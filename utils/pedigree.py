@@ -27,20 +27,33 @@ class Pedigree:
     
     KEY_ERROR = KeyError('dummy')
     
-    def __init__(self, path, countAndCalculate=True):
+    def __init__(self, path, countAndCalculate=True, zeroMissing=False):
         self.g = networkx.DiGraph()
         self.rowOrder = []
         self.extraNodeAttributes = []
         
         # TODO: parse other file formats based on their extension
-        self._parseEgoPaMa(path, countAndCalculate)
+        self._parseEgoPaMa(path, countAndCalculate, zeroMissing)
         
         if countAndCalculate:
             self._countAndCalculate()
     
-    def _parseEgoPaMa(self, path, countAndCalculate):
+    def _parseEgoPaMa(self, path, countAndCalculate, zeroMissing):
         required_indices = {}
         reserved_indices = {}
+        
+        notMissing = set()
+        if zeroMissing:
+            with open(path,'rb') as infile:
+                headerColumn = None
+                for line in infile:
+                    columns = line.strip().split('\t')
+                    if headerColumn == None:
+                        headerColumn = columns.index(Pedigree.REQUIRED_KEYS['personID'])
+                    else:
+                        personID = columns[headerColumn]
+                        notMissing.add(personID)
+            infile.close()
         
         with open(path,'rb') as infile:
             header = None
@@ -95,6 +108,12 @@ class Pedigree:
                                 attribs[i] = float(a)
                             except ValueError:
                                 pass
+                    # zero the parents if they don't exist in the file
+                    if zeroMissing:
+                        if attribs[required_indices['paID']] not in notMissing:
+                            attribs[required_indices['paID']] = '0'
+                        if attribs[required_indices['maID']] not in notMissing:
+                            attribs[required_indices['maID']] = '0'
                     
                     attribs.pop(required_indices['personID'])
                     

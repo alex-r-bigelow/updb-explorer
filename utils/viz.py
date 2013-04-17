@@ -3,9 +3,9 @@ Created on Apr 3, 2013
 
 @author: Alex Bigelow
 '''
-import sys, math, random, networkx
+import sys, random, networkx
 from PySide.QtGui import QApplication, QGraphicsScene, QGraphicsItem, QPen, QBrush, QPainterPath, QTableWidget, QTableWidgetItem
-from PySide.QtCore import Qt, QFile, QRectF, QTimer, QObject, QEvent
+from PySide.QtCore import Qt, QFile, QRectF, QTimer
 from PySide.QtUiTools import QUiLoader
 
 window = None
@@ -86,11 +86,6 @@ class edge(fadeableGraphicsItem):
 class node(fadeableGraphicsItem):
     MALE = 'M'
     FEMALE = 'F'
-    UP = 'U'
-    DOWN = 'D'
-    LEFT = 'L'
-    RIGHT = 'R'
-    EXPANSIONSEXES = set([UP,DOWN,LEFT,RIGHT])
     
     DEFAULT_PEN = QPen(Qt.darkGray, 1)
     HIGHLIGHT_PEN = QPen(Qt.green, 4)
@@ -111,6 +106,10 @@ class node(fadeableGraphicsItem):
         self.panel = panel
         
         self.sex = sex
+        
+        self.numUp = 0
+        self.numDown = 0
+        self.numHorizontal = 0
         
         self.verticalTarget = 0
         self.energy = 1.0
@@ -139,6 +138,7 @@ class node(fadeableGraphicsItem):
         radius = node.SIZE*0.5
         painter.setPen(self.pen)
         painter.setOpacity(self.opacity)
+
         if self.sex == node.MALE:
             painter.fillRect(-radius,-radius,node.SIZE,node.SIZE,self.brush)
             painter.drawRect(-radius,-radius,node.SIZE,node.SIZE)
@@ -147,40 +147,30 @@ class node(fadeableGraphicsItem):
             path.addEllipse(-radius,-radius,node.SIZE,node.SIZE)
             painter.fillPath(path,self.brush)
             painter.drawPath(path)
-        elif self.sex == node.UP:
-            path = QPainterPath()
-            path.moveTo(-radius,radius)
-            path.lineTo(0,-radius)
-            path.lineTo(radius,radius)
-            path.lineTo(-radius,radius)
-            painter.fillPath(path,self.brush)
-            painter.drawPath(path)
-        elif self.sex == node.DOWN:
-            path = QPainterPath()
-            path.moveTo(-radius,-radius)
-            path.lineTo(0,radius)
-            path.lineTo(radius,-radius)
-            path.lineTo(-radius,-radius)
-            painter.fillPath(path,self.brush)
-            painter.drawPath(path)
-        elif self.sex == node.LEFT:
-            path = QPainterPath()
-            path.moveTo(radius,-radius)
-            path.lineTo(-radius,0)
-            path.lineTo(radius,radius)
-            path.lineTo(radius,-radius)
-            painter.fillPath(path,self.brush)
-            painter.drawPath(path)
-        elif self.sex == node.RIGHT:
-            path = QPainterPath()
-            path.moveTo(-radius,-radius)
-            path.lineTo(radius,0)
-            path.lineTo(-radius,radius)
-            path.lineTo(-radius,-radius)
-            painter.fillPath(path,self.brush)
-            painter.drawPath(path)
         else:
             raise Exception('Unknown sex.')
+        
+        '''if self.numUp > 0 or self.numDown > 0 or self.numHorizontal > 0:
+            path = QPainterPath()
+            if self.numUp > 0:
+                path.moveTo(-radius,radius)
+                path.lineTo(0,-radius)
+                path.lineTo(radius,radius)
+                path.lineTo(-radius,radius)
+            elif self.numDown > 0:
+                path = QPainterPath()
+                path.moveTo(-radius,-radius)
+                path.lineTo(0,radius)
+                path.lineTo(radius,-radius)
+                path.lineTo(-radius,-radius)
+            elif self.numHorizontal > 0:
+                path = QPainterPath()
+                path.moveTo(radius,-radius)
+                path.lineTo(-radius,0)
+                path.lineTo(radius,radius)
+                path.lineTo(radius,-radius)
+            painter.fillPath(path,self.brush)
+            painter.drawPath(path)'''
     
     def mousePressEvent(self, event):
         self.grabMouse()
@@ -197,8 +187,8 @@ class node(fadeableGraphicsItem):
         self.dx = 0
         self.dy = 0
         self.ignoreForces = False
-        if self.sex in node.EXPANSIONSEXES:
-            self.panel.expand(self.personID)
+        #if self.numUp > 0 or self.numDown > 0 or self.numHorizontal > 0:
+        #    self.panel.expand(self.personID)
         
     def updateValues(self, neighbors):
         # Average every neighbor's energy with my own, then decay it a little
@@ -280,9 +270,14 @@ class pedigreePanel:
                 self.g.node[self.highlighted]['item'].pen = node.HIGHLIGHT_PEN
     
     def expand(self, person):
-        pass
+        if not self.g.node.has_key(person):
+            return
+        n = self.g.node[person]['item']
+        if not n.dead:
+            nuclearFamily = set(p[0] for p in self.ped.iterNuclear(person))
+            self.addPeople(nuclearFamily)
     
-    def addPeople(self, people, link=False):
+    def addPeople(self, people):
         # Create the node objects, update the number of generations
         for p in people:
             if self.g.node.has_key(p):
@@ -293,7 +288,7 @@ class pedigreePanel:
                 n.setZValue(1)
                 self.g.add_node(p, {'item':n})
                 self.scene.addItem(n)
-        # Add links to other people that are in the pedigree
+        # Add links to other people that are in the pedigree... give directions to the border people
         for p in people:
             for p2,t in self.ped.iterNuclear(p):
                 if self.g.node.has_key(p2):
@@ -310,7 +305,27 @@ class pedigreePanel:
                         self.g.add_edge(p, p2, {'item':e})
                         self.scene.addItem(e)
         self.refreshGenerations()
-        corpses = set() # painting happens in the same thread addPeople is in... this releases objects taking up memory
+        corpses = set() # painting happens in the same thread addPeople is in... we only want to release dead QGraphicsItems every once in a while
+    
+    def refreshBorders(self):
+        for person,links in self.g.edge.iteritems():
+            if len(links) <= 2:
+                self.g.node[person]['item'].numUp = 0
+                self.g.node[person]['item'].numDown = 0
+                self.g.node[person]['item'].numHorizontal = 0
+                for p,t in self.ped.iterNuclear(person):
+                    if self.g.node.has_key(p):
+                        continue
+                    elif t == self.ped.PARENT_TO_CHILD:
+                        self.g.node[person]['item'].numDown += 1
+                    elif t == self.ped.CHILD_TO_PARENT:
+                        self.g.node[person]['item'].numUp += 1
+                    else:
+                        self.g.node[person]['item'].numHorizontal += 1
+            else:
+                self.g.node[person]['item'].numUp = 0
+                self.g.node[person]['item'].numDown = 0
+                self.g.node[person]['item'].numHorizontal = 0
     
     def removePeople(self, people):
         # Start the time bombs
@@ -380,16 +395,17 @@ class pedigreePanel:
         existingItems = set(self.scene.items())
         for source,target in edgesToRemove:
             e = self.g.edge[source][target]['item']
-            corpses.add(e)  # keep a reference to the item around until we know Qt won't try to access it any more
+            corpses.add(e)  # keep a reference to the item around until we know the main thread won't try to access it anymore (remember, this function is called from a timer)
             self.g.remove_edge(source, target)
             if e in existingItems:
                 self.scene.removeItem(e)
         for p in nodesToRemove:
             n = self.g.node[p]['item']
-            corpses.add(n)  # keep a reference to the item around until we know Qt won't try to access it any more
+            corpses.add(n)  # keep a reference to the item around until we know the main thread won't try to access it anymore (remember, this function is called from a timer)
             self.g.remove_node(p)
             if n in existingItems:
                 self.scene.removeItem(n)
+        self.refreshBorders()
         self.refreshGenerations()
         
         # Finally, prep the next update by applying forces

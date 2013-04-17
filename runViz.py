@@ -3,7 +3,7 @@ import argparse, webbrowser, shutil, os
 from utils.pedigree import Pedigree, gexf_node_attribute_mapper
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Visualizes an ego-pa-ma file.')
+    parser = argparse.ArgumentParser(description='Visualizes an ego-pa-ma file; you should have run calculateD.py before running this.')
     parser.add_argument('--in', type=str, dest="infile", required = True, help='Path to ego-pa-ma tab-separated file with headers.')
     
     for k,d in Pedigree.REQUIRED_KEYS.iteritems():
