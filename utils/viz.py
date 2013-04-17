@@ -8,6 +8,9 @@ from PySide.QtGui import QApplication, QGraphicsScene, QGraphicsItem, QPen, QBru
 from PySide.QtCore import Qt, QFile, QRectF, QTimer, QObject, QEvent
 from PySide.QtUiTools import QUiLoader
 
+window = None
+corpses = set()
+
 class fadeableGraphicsItem(QGraphicsItem):
     SPEED = 0.05
     def __init__(self):
@@ -81,6 +84,14 @@ class edge(fadeableGraphicsItem):
             return edge.VERTICAL_FORCE*(self.source.y() - self.target.y())
 
 class node(fadeableGraphicsItem):
+    MALE = 'M'
+    FEMALE = 'F'
+    UP = 'U'
+    DOWN = 'D'
+    LEFT = 'L'
+    RIGHT = 'R'
+    EXPANSIONSEXES = set([UP,DOWN,LEFT,RIGHT])
+    
     DEFAULT_PEN = QPen(Qt.darkGray, 1)
     HIGHLIGHT_PEN = QPen(Qt.green, 4)
     
@@ -94,8 +105,11 @@ class node(fadeableGraphicsItem):
     REPULSION_FORCE = 0.01
     ENERGY_DECAY = 0.0001
     
-    def __init__(self, sex, startingX = None, startingY = None):
+    def __init__(self, personID, panel, sex, startingX = None, startingY = None):
         fadeableGraphicsItem.__init__(self)
+        self.personID = personID
+        self.panel = panel
+        
         self.sex = sex
         
         self.verticalTarget = 0
@@ -125,12 +139,44 @@ class node(fadeableGraphicsItem):
         radius = node.SIZE*0.5
         painter.setPen(self.pen)
         painter.setOpacity(self.opacity)
-        if self.sex == 'M':
+        if self.sex == node.MALE:
             painter.fillRect(-radius,-radius,node.SIZE,node.SIZE,self.brush)
             painter.drawRect(-radius,-radius,node.SIZE,node.SIZE)
-        elif self.sex == 'F':
+        elif self.sex == node.FEMALE:
             path = QPainterPath()
             path.addEllipse(-radius,-radius,node.SIZE,node.SIZE)
+            painter.fillPath(path,self.brush)
+            painter.drawPath(path)
+        elif self.sex == node.UP:
+            path = QPainterPath()
+            path.moveTo(-radius,radius)
+            path.lineTo(0,-radius)
+            path.lineTo(radius,radius)
+            path.lineTo(-radius,radius)
+            painter.fillPath(path,self.brush)
+            painter.drawPath(path)
+        elif self.sex == node.DOWN:
+            path = QPainterPath()
+            path.moveTo(-radius,-radius)
+            path.lineTo(0,radius)
+            path.lineTo(radius,-radius)
+            path.lineTo(-radius,-radius)
+            painter.fillPath(path,self.brush)
+            painter.drawPath(path)
+        elif self.sex == node.LEFT:
+            path = QPainterPath()
+            path.moveTo(radius,-radius)
+            path.lineTo(-radius,0)
+            path.lineTo(radius,radius)
+            path.lineTo(radius,-radius)
+            painter.fillPath(path,self.brush)
+            painter.drawPath(path)
+        elif self.sex == node.RIGHT:
+            path = QPainterPath()
+            path.moveTo(-radius,-radius)
+            path.lineTo(radius,0)
+            path.lineTo(-radius,radius)
+            path.lineTo(-radius,-radius)
             painter.fillPath(path,self.brush)
             painter.drawPath(path)
         else:
@@ -142,6 +188,7 @@ class node(fadeableGraphicsItem):
     
     def mouseMoveEvent(self, event):
         self.setPos(event.scenePos())
+        self.panel.highlight(self.personID)
         # As moving a node will cause disruption, allow me (and consequently my neighbors) to move faster
         self.energy = 1.0
     
@@ -150,6 +197,8 @@ class node(fadeableGraphicsItem):
         self.dx = 0
         self.dy = 0
         self.ignoreForces = False
+        if self.sex in node.EXPANSIONSEXES:
+            self.panel.expand(self.personID)
         
     def updateValues(self, neighbors):
         # Average every neighbor's energy with my own, then decay it a little
@@ -208,8 +257,8 @@ class pedigreePanel:
         self.view = view
         self.ped = ped
         self.g = networkx.Graph()
-        self.generations = {}
         
+        self.generations = {}
         self.minGen = None
         self.maxGen = None
         
@@ -230,24 +279,20 @@ class pedigreePanel:
             if self.g.node.has_key(self.highlighted) and not self.g.node[self.highlighted]['item'].dead:
                 self.g.node[self.highlighted]['item'].pen = node.HIGHLIGHT_PEN
     
-    def addPeople(self, people):
+    def expand(self, person):
+        pass
+    
+    def addPeople(self, people, link=False):
         # Create the node objects, update the number of generations
         for p in people:
             if self.g.node.has_key(p):
                 n = self.g.node[p]['item']
                 n.revive()
             else:
-                n = node(self.ped.getAttribute(p,'sex','?'))
+                n = node(p,self,self.ped.getAttribute(p,'sex','?'), startingX = 0)
                 n.setZValue(1)
                 self.g.add_node(p, {'item':n})
                 self.scene.addItem(n)
-                
-                gen = self.ped.getAttribute(p,'generation',0)
-                self.minGen = min(gen,self.minGen)
-                self.maxGen = max(gen,self.maxGen)
-                if not self.generations.has_key(gen):
-                    self.generations[gen] = set()
-                self.generations[gen].add(p)
         # Add links to other people that are in the pedigree
         for p in people:
             for p2,t in self.ped.iterNuclear(p):
@@ -264,13 +309,14 @@ class pedigreePanel:
                         e.setZValue(0)
                         self.g.add_edge(p, p2, {'item':e})
                         self.scene.addItem(e)
-        self.updateTargets()
+        self.refreshGenerations()
+        corpses = set() # painting happens in the same thread addPeople is in... this releases objects taking up memory
     
     def removePeople(self, people):
         # Start the time bombs
         for p in people:
-            for p2 in self.g.edges(p):
-                self.g.edge[p][p2]['item'].kill()
+            for attrs in self.g.edge[p].itervalues():
+                attrs['item'].kill()
             self.g.node[p]['item'].kill()
     
     def removeEveryone(self):
@@ -279,33 +325,37 @@ class pedigreePanel:
         for attrs in self.g.node.itervalues():
             attrs['item'].kill()
     
-    def updateTargets(self):
-        # find our new generation boundaries
-        prevMin = self.minGen
-        prevMax = self.maxGen
-        
+    def refreshGenerations(self):
+        self.generations = {}
         self.minGen = None
         self.maxGen = None
         
-        for gen,people in self.generations.iteritems():
-            if len(people) > 0:
-                if self.minGen == None:
-                    self.minGen = gen
-                    self.maxGen = gen
-                else:
-                    self.minGen = min(self.minGen,gen)
-                    self.maxGen = max(self.maxGen,gen)
-        if self.minGen == None or self.maxGen == None or (self.minGen == prevMin and self.maxGen == prevMax):
-            return # don't need to do anything
-        else:
-            bottom = 500    # TODO: get this size differently somehow...
-            offset = node.SIZE*0.5 # center-based drawing
-            increment = bottom / (max(self.maxGen-self.minGen+1,2))
-            for p, attrs in self.g.node.iteritems():
-                n = attrs['item']
-                if not n.dead:
-                    slot = self.maxGen - self.ped.getAttribute(p,'generation',self.maxGen) - 1
-                    self.g.node[p]['item'].verticalTarget = bottom - slot*increment - offset
+        for p in self.g.node.iterkeys():
+            gen = self.ped.getAttribute(p,'generation',0)
+            
+            if self.minGen == None:
+                self.minGen = gen
+                self.maxGen = gen
+            else:
+                self.minGen = min(self.minGen,gen)
+                self.maxGen = max(self.maxGen,gen)
+            
+            if not self.generations.has_key(gen):
+                self.generations[gen] = set()
+            self.generations[gen].add(p)
+        
+        if self.minGen == None:
+            return
+        
+        bottom = 500    # TODO: get this size differently somehow...
+        offset = node.SIZE*0.5 # center-based drawing
+        increment = bottom / (max(self.maxGen-self.minGen+1,2))
+        
+        for p,attrs in self.g.node.iteritems():
+            n = attrs['item']
+            if not n.dead:
+                slot = self.maxGen - self.ped.getAttribute(p,'generation',self.maxGen) - 1
+                self.g.node[p]['item'].verticalTarget = bottom - slot*increment - offset
     
     def updateValues(self):
         # Update opacity values, positions for this frame
@@ -330,21 +380,18 @@ class pedigreePanel:
         existingItems = set(self.scene.items())
         for source,target in edgesToRemove:
             e = self.g.edge[source][target]['item']
-            self.g.remove_edge(source, target)  # Have to remove the python edge first so that python doesn't try do delete the QGraphicsItem after Qt already has
+            corpses.add(e)  # keep a reference to the item around until we know Qt won't try to access it any more
+            self.g.remove_edge(source, target)
             if e in existingItems:
                 self.scene.removeItem(e)
         for p in nodesToRemove:
             n = self.g.node[p]['item']
+            corpses.add(n)  # keep a reference to the item around until we know Qt won't try to access it any more
             self.g.remove_node(p)
             if n in existingItems:
                 self.scene.removeItem(n)
-        needNewTargets = False
-        for people in self.generations.itervalues():
-            people.difference_update(nodesToRemove)
-            if len(people):
-                needNewTargets = True
-        if needNewTargets:
-            self.updateTargets()
+        self.refreshGenerations()
+        
         # Finally, prep the next update by applying forces
         for p,attrs in self.g.node.iteritems():
             connectedEdges = set(attrs['item'] for attrs in self.g.edge[p].itervalues())
@@ -430,7 +477,7 @@ class TableWidget(QTableWidget):
                 # TODO: handle meta interactions
             else:
                 brush = TableWidget.MOUSE_OVER_BG
-                self.mainApp.previewSwitch(currentID)
+                self.mainApp.highlight(currentID)
             # Draw new mouse actions
             for c in xrange(self.numColumns+1):
                 self.item(self.mousedRow,c).setBackground(brush)
@@ -489,12 +536,15 @@ class Viz:
         #self.window.showMaximized()
         self.window.showFullScreen()
     
-    def previewSwitch(self, person):
+    def highlight(self, person):
         self.pedigreeView.highlight(person)
     
     def switch(self, person):
-        self.pedigreeView.removeEveryone()
-        self.pedigreeView.addPeople(set(self.ped.iterDownWithSpouses(person)))
+        oldSet = set(self.pedigreeView.g.node.iterkeys())
+        newSet = set(self.ped.iterDownWithSpouses(person))
+        
+        self.pedigreeView.removePeople(oldSet.difference(newSet))
+        self.pedigreeView.addPeople(newSet.difference(oldSet))
     
     def previewIntersect(self, person):
         pass
