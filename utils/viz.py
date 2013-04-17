@@ -9,7 +9,7 @@ from PySide.QtCore import Qt, QFile, QRectF, QTimer, QObject, QEvent
 from PySide.QtUiTools import QUiLoader
 
 class fadeableGraphicsItem(QGraphicsItem):
-    SPEED = 0.1
+    SPEED = 0.05
     def __init__(self):
         QGraphicsItem.__init__(self)
         self.dead = False
@@ -44,8 +44,8 @@ class edge(fadeableGraphicsItem):
     HORIZONTAL_FORCE = 0.005
     VERTICAL_FORCE = 0.03
     
-    MARRIAGE_PEN = QPen(Qt.lightGray, 1, Qt.DotLine)
-    GENETIC_PEN = QPen(Qt.darkGray, 1)
+    MARRIAGE_PEN = QPen(Qt.lightGray, 2, Qt.DotLine)
+    GENETIC_PEN = QPen(Qt.darkGray, 2)
     
     MARRIAGE = 0
     GENETIC = 1
@@ -82,13 +82,13 @@ class edge(fadeableGraphicsItem):
 
 class node(fadeableGraphicsItem):
     DEFAULT_PEN = QPen(Qt.darkGray, 1)
-    HIGHLIGHT_PEN = QPen(Qt.black, 4)
+    HIGHLIGHT_PEN = QPen(Qt.green, 4)
     
     DEFAULT_BRUSH = QBrush(Qt.darkGray)
     AFFECTED_BRUSH = QBrush(Qt.red)
     ANCESTOR_BRUSH = QBrush(Qt.black)
     
-    SIZE = 10
+    SIZE = 15
     
     GENERATION_FORCE = 0.015
     REPULSION_FORCE = 0.01
@@ -224,10 +224,10 @@ class pedigreePanel:
     
     def highlight(self, person):
         if self.highlighted != person:
-            if self.highlighted != None and self.g.node.has_key(self.highlighted):
+            if self.highlighted != None and self.g.node.has_key(self.highlighted) and not self.g.node[self.highlighted]['item'].dead:
                 self.g.node[self.highlighted]['item'].pen = node.DEFAULT_PEN
+            self.highlighted = person
             if self.g.node.has_key(self.highlighted) and not self.g.node[self.highlighted]['item'].dead:
-                self.highlighted = person
                 self.g.node[self.highlighted]['item'].pen = node.HIGHLIGHT_PEN
     
     def addPeople(self, people):
@@ -320,20 +320,24 @@ class pedigreePanel:
                     e.updateValues()
                     myNeighbors.add(self.g.node[target]['item'])
                 else:
-                    edgesToRemove.add((source,target))
+                    if not (target,source) in edgesToRemove:
+                        edgesToRemove.add((source,target))
             if not n.dead:
                 n.updateValues(myNeighbors)
             else:
                 nodesToRemove.add(source)
         # Purge stuff we need to get rid of... start with edges
+        existingItems = set(self.scene.items())
         for source,target in edgesToRemove:
             e = self.g.edge[source][target]['item']
-            self.scene.removeItem(e)
-            self.g.remove_edge(source, target)
+            self.g.remove_edge(source, target)  # Have to remove the python edge first so that python doesn't try do delete the QGraphicsItem after Qt already has
+            if e in existingItems:
+                self.scene.removeItem(e)
         for p in nodesToRemove:
             n = self.g.node[p]['item']
-            self.scene.removeItem(n)
             self.g.remove_node(p)
+            if n in existingItems:
+                self.scene.removeItem(n)
         needNewTargets = False
         for people in self.generations.itervalues():
             people.difference_update(nodesToRemove)
@@ -362,7 +366,7 @@ class PythonTableWidgetItem(QTableWidgetItem):
 class TableWidget(QTableWidget):
     NORMAL_BG = QBrush(Qt.white)
     
-    MOUSE_OVER_BG = QBrush(Qt.lightGray)
+    MOUSE_OVER_BG = QBrush(Qt.green)
     
     MOUSE_META_BG = QBrush(Qt.gray)
     
@@ -443,7 +447,7 @@ class Viz:
         self.ped = ped
         
         self.loader = QUiLoader()
-        infile = QFile("Prototypes5/viz.ui")
+        infile = QFile("utils/viz.ui")
         infile.open(QFile.ReadOnly)
         self.window = self.loader.load(infile, None)
         infile.close()

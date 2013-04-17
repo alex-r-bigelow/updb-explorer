@@ -21,6 +21,6 @@ if __name__ == '__main__':
     print "Loading file..."
     ped = Pedigree(args.infile, countAndCalculate=False)
     print "Starting viz..."
-    from Prototypes5.viz import run
+    from utils.viz import run
     run(ped)
     print "Done."
