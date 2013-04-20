@@ -4,7 +4,7 @@ Created on Apr 3, 2013
 @author: Alex Bigelow
 '''
 import sys, random, networkx
-from PySide.QtGui import QApplication, QGraphicsScene, QGraphicsItem, QPen, QBrush, QPainterPath, QTableWidget, QTableWidgetItem
+from PySide.QtGui import QApplication, QGraphicsScene, QGraphicsItem, QPen, QBrush, QPainterPath, QTableWidget, QTableWidgetItem, QMenu
 from PySide.QtCore import Qt, QFile, QRectF, QTimer
 from PySide.QtUiTools import QUiLoader
 
@@ -13,9 +13,14 @@ corpses = set()
 
 class fadeableGraphicsItem(QGraphicsItem):
     SPEED = 0.05
+    HIDDEN_OPACITY = 0.25
+    
     def __init__(self):
         QGraphicsItem.__init__(self)
         self.dead = False
+        self.hiding = False
+        self.killed = False
+        
         self.fadingIn = True
         self.fadingOut = False
         self.opacity = 0.0
@@ -28,27 +33,48 @@ class fadeableGraphicsItem(QGraphicsItem):
                 self.fadingIn = False
         elif self.fadingOut:
             self.opacity -= fadeableGraphicsItem.SPEED
-            if self.opacity <= 0.0:
-                self.opacity = 0.0
-                self.fadingOut = False
-                self.dead = True
+            if self.hiding:
+                if self.opacity <= fadeableGraphicsItem.HIDDEN_OPACITY:
+                    self.opacity = fadeableGraphicsItem.HIDDEN_OPACITY
+                    self.fadingOut = False
+            elif self.killed:
+                if self.opacity <= 0.0:
+                    self.opacity = 0.0
+                    self.fadingOut = False
+                    self.dead = True
+    
+    def hide(self):
+        if self.killed:
+            return
+        self.hiding = True
+        self.fadingOut = True
+    
+    def show(self):
+        self.hiding = False
+        self.fadingIn = True
     
     def kill(self):
+        self.hiding = False
+        self.killed = True
         self.fadingIn = False
         self.fadingOut = True
     
     def revive(self):
         self.dead = False
-        self.fadingOut = False
-        if self.opacity < 1.0:
+        self.killed = False
+        if not self.hiding:
+            self.fadingOut = False
             self.fadingIn = True
+        else:
+            self.fadingOut = True
+            self.fadingIn = False
 
 class edge(fadeableGraphicsItem):
     HORIZONTAL_FORCE = 0.005
     VERTICAL_FORCE = 0.03
     
     MARRIAGE_PEN = QPen(Qt.lightGray, 2, Qt.DotLine)
-    GENETIC_PEN = QPen(Qt.darkGray, 2)
+    GENETIC_PEN = QPen(Qt.darkGray, 1.5)
     
     MARRIAGE = 0
     GENETIC = 1
@@ -94,10 +120,11 @@ class node(fadeableGraphicsItem):
     AFFECTED_BRUSH = QBrush(Qt.red)
     ANCESTOR_BRUSH = QBrush(Qt.black)
     
-    SIZE = 15
+    SIZE = 12
     
     GENERATION_FORCE = 0.015
     REPULSION_FORCE = 0.01
+    MAX_ENERGY = 1.0
     ENERGY_DECAY = 0.0001
     
     def __init__(self, personID, panel, sex, startingX = None, startingY = None):
@@ -107,12 +134,16 @@ class node(fadeableGraphicsItem):
         
         self.sex = sex
         
-        self.numUp = 0
-        self.numDown = 0
-        self.numHorizontal = 0
+        self.allParents = 0
+        self.allChildren = 0
+        self.allSpouses = 0
+        
+        self.hiddenParents = 0
+        self.hiddenChildren = 0
+        self.hiddenSpouses = 0
         
         self.verticalTarget = 0
-        self.energy = 1.0
+        self.energy = node.MAX_ENERGY
         self.dx = 0.0
         self.dy = 0.0
         
@@ -150,20 +181,20 @@ class node(fadeableGraphicsItem):
         else:
             raise Exception('Unknown sex.')
         
-        '''if self.numUp > 0 or self.numDown > 0 or self.numHorizontal > 0:
+        '''if self.hiddenParents > 0 or self.hiddenChildren > 0 or self.hiddenSpouses > 0:
             path = QPainterPath()
-            if self.numUp > 0:
+            if self.hiddenParents > 0:
                 path.moveTo(-radius,radius)
                 path.lineTo(0,-radius)
                 path.lineTo(radius,radius)
                 path.lineTo(-radius,radius)
-            elif self.numDown > 0:
+            elif self.hiddenChildren > 0:
                 path = QPainterPath()
                 path.moveTo(-radius,-radius)
                 path.lineTo(0,radius)
                 path.lineTo(radius,-radius)
                 path.lineTo(-radius,-radius)
-            elif self.numHorizontal > 0:
+            elif self.hiddenSpouses > 0:
                 path = QPainterPath()
                 path.moveTo(radius,-radius)
                 path.lineTo(-radius,0)
@@ -180,15 +211,15 @@ class node(fadeableGraphicsItem):
         self.setPos(event.scenePos())
         self.panel.highlight(self.personID)
         # As moving a node will cause disruption, allow me (and consequently my neighbors) to move faster
-        self.energy = 1.0
+        self.energy = node.MAX_ENERGY
     
     def mouseReleaseEvent(self, event):
         self.ungrabMouse()
+        self.ignoreForces = False
         self.dx = 0
         self.dy = 0
-        self.ignoreForces = False
-        #if self.numUp > 0 or self.numDown > 0 or self.numHorizontal > 0:
-        #    self.panel.expand(self.personID)
+        if event.button() == Qt.RightButton:
+            self.panel.contextMenu(self, event.scenePos().toPoint())
         
     def updateValues(self, neighbors):
         # Average every neighbor's energy with my own, then decay it a little
@@ -243,6 +274,10 @@ class node(fadeableGraphicsItem):
 class pedigreePanel:
     FRAME_DURATION = 1000/60 # 60 FPS
     
+    UP = 0
+    HORIZONTAL = 1
+    DOWN = 2
+    
     def __init__(self, view, ped):
         self.view = view
         self.ped = ped
@@ -269,14 +304,6 @@ class pedigreePanel:
             if self.g.node.has_key(self.highlighted) and not self.g.node[self.highlighted]['item'].dead:
                 self.g.node[self.highlighted]['item'].pen = node.HIGHLIGHT_PEN
     
-    def expand(self, person):
-        if not self.g.node.has_key(person):
-            return
-        n = self.g.node[person]['item']
-        if not n.dead:
-            nuclearFamily = set(p[0] for p in self.ped.iterNuclear(person))
-            self.addPeople(nuclearFamily)
-    
     def addPeople(self, people):
         # Create the node objects, update the number of generations
         for p in people:
@@ -285,10 +312,11 @@ class pedigreePanel:
                 n.revive()
             else:
                 n = node(p,self,self.ped.getAttribute(p,'sex','?'), startingX = 0)
+                n.allParents,n.allSpouses,n.allChildren = self.ped.countNuclear(p)
                 n.setZValue(1)
                 self.g.add_node(p, {'item':n})
                 self.scene.addItem(n)
-        # Add links to other people that are in the pedigree... give directions to the border people
+        # Add links to other people that are in the pedigree
         for p in people:
             for p2,t in self.ped.iterNuclear(p):
                 if self.g.node.has_key(p2):
@@ -304,32 +332,100 @@ class pedigreePanel:
                         e.setZValue(0)
                         self.g.add_edge(p, p2, {'item':e})
                         self.scene.addItem(e)
+        self.refreshHiddenCounts()
         self.refreshGenerations()
         corpses = set() # painting happens in the same thread addPeople is in... we only want to release dead QGraphicsItems every once in a while
     
-    def refreshBorders(self):
-        for person,links in self.g.edge.iteritems():
-            if len(links) <= 2:
-                self.g.node[person]['item'].numUp = 0
-                self.g.node[person]['item'].numDown = 0
-                self.g.node[person]['item'].numHorizontal = 0
-                for p,t in self.ped.iterNuclear(person):
-                    if self.g.node.has_key(p):
-                        continue
-                    elif t == self.ped.PARENT_TO_CHILD:
-                        self.g.node[person]['item'].numDown += 1
-                    elif t == self.ped.CHILD_TO_PARENT:
-                        self.g.node[person]['item'].numUp += 1
-                    else:
-                        self.g.node[person]['item'].numHorizontal += 1
-            else:
-                self.g.node[person]['item'].numUp = 0
-                self.g.node[person]['item'].numDown = 0
-                self.g.node[person]['item'].numHorizontal = 0
+    def contextMenu(self, item, position):
+        if item.dead:
+            return
+        menu = QMenu(self.view)
+        menu.addAction(u'Remove')
+        
+        if item.hiddenParents > 0:
+            menu.addAction(u'Expand Parents')
+        elif item.allParents > 0:
+            menu.addAction(u'Collapse Parents')
+        else:
+            # TODO
+            menu.addAction(u'No Parents')
+        
+        if item.hiddenSpouses > 0:
+            menu.addAction(u'Expand Spouses')
+        elif item.allSpouses > 0:
+            menu.addAction(u'Collapse Spouses')
+        else:
+            # TODO
+            menu.addAction(u'No Spouses')
+        
+        if item.hiddenChildren > 0:
+            menu.addAction(u'Expand Children')
+        elif item.allChildren > 0:
+            menu.addAction(u'Collapse Children')
+        else:
+            # TODO
+            menu.addAction(u'No Children')
+        
+        resultAction = menu.exec_(position)
+        
+        if resultAction != None and resultAction != 0:
+            if resultAction.text() == u'Remove':
+                self.discardPeople(item.personID)
+            if resultAction.text() == u'Expand Parents':
+                self.addPeople(set(self.ped.iterParents(item.personID)))
+            elif resultAction.text() == u'Collapse Parents':
+                self.discardPeople(set(self.ped.iterParents(item.personID)))
+                self.cleanUp(item.personID)
+            elif resultAction.text() == u'Expand Spouses':
+                self.addPeople(set(self.ped.iterSpouses(item.personID)))
+            elif resultAction.text() == u'Collapse Spouses':
+                self.discardPeople(set(self.ped.iterSpouses(item.personID)))
+                self.cleanUp(item.personID)
+            elif resultAction.text() == u'Expand Children':
+                self.addPeople(set(self.ped.iterChildren(item.personID)))
+            elif resultAction.text() == u'Collapse Children':
+                self.discardPeople(set(self.ped.iterChildren(item.personID)))
+                self.cleanUp(item.personID)
+            # TODO: clean up discarded people
     
-    def removePeople(self, people):
+    def cleanUp(self, person):
+        # throw away any connected components that aren't connected to person
+        nodesToRemove = set(self.g.node.iterkeys())
+        nodesToKeep = set()
+        
+        # Iterate down then up BFS style
+        toVisit = [person]
+        while len(toVisit) > 0:
+            p = toVisit.pop(0)
+            if not p in nodesToKeep:
+                nodesToKeep.add(p)
+                nodesToRemove.discard(p)
+                for p2 in self.g.edge[p].iterkeys():
+                    if not self.g.node[p2]['item'].dead and not self.g.node[p2]['item'].killed:
+                        toVisit.append(p2)
+        
+        self.discardPeople(nodesToRemove)
+    
+    def refreshHiddenCounts(self):
+        for person in self.g.node.iterkeys():
+            self.g.node[person]['item'].hiddenParents = 0
+            self.g.node[person]['item'].hiddenChildren = 0
+            self.g.node[person]['item'].hiddenSpouses = 0
+            for p,t in self.ped.iterNuclear(person):
+                if self.g.node.has_key(p):
+                    continue
+                elif t == self.ped.PARENT_TO_CHILD:
+                    self.g.node[person]['item'].hiddenChildren += 1
+                elif t == self.ped.CHILD_TO_PARENT:
+                    self.g.node[person]['item'].hiddenParents += 1
+                else:
+                    self.g.node[person]['item'].hiddenSpouses += 1
+    
+    def discardPeople(self, people):
         # Start the time bombs
         for p in people:
+            if not self.g.edge.has_key(p):
+                continue
             for attrs in self.g.edge[p].itervalues():
                 attrs['item'].kill()
             self.g.node[p]['item'].kill()
@@ -405,7 +501,7 @@ class pedigreePanel:
             self.g.remove_node(p)
             if n in existingItems:
                 self.scene.removeItem(n)
-        self.refreshBorders()
+        self.refreshHiddenCounts()
         self.refreshGenerations()
         
         # Finally, prep the next update by applying forces
@@ -557,9 +653,9 @@ class Viz:
     
     def switch(self, person):
         oldSet = set(self.pedigreeView.g.node.iterkeys())
-        newSet = set(self.ped.iterDownWithSpouses(person))
+        newSet = set(self.ped.iterDown(person))
         
-        self.pedigreeView.removePeople(oldSet.difference(newSet))
+        self.pedigreeView.discardPeople(oldSet.difference(newSet))
         self.pedigreeView.addPeople(newSet.difference(oldSet))
     
     def previewIntersect(self, person):

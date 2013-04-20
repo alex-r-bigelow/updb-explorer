@@ -257,9 +257,22 @@ class Pedigree:
             yield spouse
     
     def iterNuclear(self, person):
-        # return the person and the relationship in a tuple in a nuclear family
+        # return the person and the relationship in a tuple
         for p,attrs in self.g.edge[person].iteritems():
             yield (p,attrs['type'])
+    
+    def countNuclear(self, person):
+        parents = 0
+        spouses = 0
+        children = 0
+        for attrs in self.g.edge[person].itervalues():
+            if attrs['type'] == Pedigree.CHILD_TO_PARENT:
+                parents += 1
+            elif attrs['type'] == Pedigree.PARENT_TO_CHILD:
+                children += 1
+            else:
+                spouses += 1
+        return (parents,spouses,children)
     
     def iterUp(self,person):
         # BFS using a queue
