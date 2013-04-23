@@ -4,7 +4,7 @@ Created on Apr 3, 2013
 @author: Alex Bigelow
 '''
 import sys, random, networkx
-from PySide.QtGui import QApplication, QGraphicsScene, QGraphicsItem, QPen, QBrush, QPainterPath, QTableWidget, QTableWidgetItem, QMenu
+from PySide.QtGui import QApplication, QGraphicsScene, QGraphicsItem, QPen, QBrush, QColor, QPainterPath, QTableWidget, QTableWidgetItem, QMenu
 from PySide.QtCore import Qt, QFile, QRectF, QTimer
 from PySide.QtUiTools import QUiLoader
 
@@ -113,14 +113,18 @@ class node(fadeableGraphicsItem):
     MALE = 'M'
     FEMALE = 'F'
     
-    DEFAULT_PEN = QPen(Qt.darkGray, 1)
-    HIGHLIGHT_PEN = QPen(Qt.green, 4)
+    DEFAULT_PEN = QPen(Qt.black, 1)
+    HIGHLIGHT_PEN = QPen(Qt.black, 5)
     
     DEFAULT_BRUSH = QBrush(Qt.darkGray)
     AFFECTED_BRUSH = QBrush(Qt.red)
     ANCESTOR_BRUSH = QBrush(Qt.black)
     
     SIZE = 12
+    FAN_SIZE = 36
+    FAN_PEN = QPen(Qt.black, 0)
+    FAN_BRUSH = QBrush(Qt.darkGray)
+    FAN_OPACITY = 0.5
     
     GENERATION_FORCE = 0.015
     REPULSION_FORCE = 0.01
@@ -129,6 +133,8 @@ class node(fadeableGraphicsItem):
     
     def __init__(self, personID, panel, sex, startingX = None, startingY = None):
         fadeableGraphicsItem.__init__(self)
+        self.setAcceptHoverEvents(True)
+        
         self.personID = personID
         self.panel = panel
         
@@ -148,6 +154,7 @@ class node(fadeableGraphicsItem):
         self.dy = 0.0
         
         self.ignoreForces = False
+        self.highlighted = False
         
         # start off with random positions; TODO: figure out bounds
         if startingX == None:
@@ -161,47 +168,109 @@ class node(fadeableGraphicsItem):
         self.brush = node.DEFAULT_BRUSH
     
     def boundingRect(self):
-        stroke = self.pen.widthF()
-        radius = node.SIZE*0.5 + stroke
-        return QRectF(-radius,-radius,node.SIZE+stroke,node.SIZE+stroke)
+        radius = node.FAN_SIZE*0.5
+        return QRectF(-radius,-radius,node.FAN_SIZE,node.FAN_SIZE)
     
     def paint(self, painter, option, widget=None):
+        # Center glyph
         radius = node.SIZE*0.5
-        painter.setPen(self.pen)
+        if self.highlighted:
+            self.paintFan(painter)
+            painter.setPen(node.HIGHLIGHT_PEN)
+        else:
+            painter.setPen(node.DEFAULT_PEN)
         painter.setOpacity(self.opacity)
-
+        
         if self.sex == node.MALE:
             painter.fillRect(-radius,-radius,node.SIZE,node.SIZE,self.brush)
-            painter.drawRect(-radius,-radius,node.SIZE,node.SIZE)
+            #painter.drawRect(-radius,-radius,node.SIZE,node.SIZE)
         elif self.sex == node.FEMALE:
             path = QPainterPath()
             path.addEllipse(-radius,-radius,node.SIZE,node.SIZE)
             painter.fillPath(path,self.brush)
-            painter.drawPath(path)
+            #painter.drawPath(path)
         else:
             raise Exception('Unknown sex.')
+    
+    def paintFan(self, painter):
+        painter.setOpacity(min(self.opacity,node.FAN_OPACITY))
+        outerRadius = node.FAN_SIZE*0.5
+        innerRadius = node.SIZE*0.5
         
-        '''if self.hiddenParents > 0 or self.hiddenChildren > 0 or self.hiddenSpouses > 0:
-            path = QPainterPath()
-            if self.hiddenParents > 0:
-                path.moveTo(-radius,radius)
-                path.lineTo(0,-radius)
-                path.lineTo(radius,radius)
-                path.lineTo(-radius,radius)
-            elif self.hiddenChildren > 0:
-                path = QPainterPath()
-                path.moveTo(-radius,-radius)
-                path.lineTo(0,radius)
-                path.lineTo(radius,-radius)
-                path.lineTo(-radius,-radius)
-            elif self.hiddenSpouses > 0:
-                path = QPainterPath()
-                path.moveTo(radius,-radius)
-                path.lineTo(-radius,0)
-                path.lineTo(radius,radius)
-                path.lineTo(radius,-radius)
-            painter.fillPath(path,self.brush)
-            painter.drawPath(path)'''
+        # Parent fan
+        path = QPainterPath()
+        
+        if self.allParents == 0:
+            pass
+        elif self.hiddenParents > 0:
+            # point out
+            path.moveTo(-innerRadius,-innerRadius)
+            path.lineTo(0,-outerRadius)
+            path.lineTo(innerRadius,-innerRadius)
+            path.lineTo(-innerRadius,-innerRadius)
+        else:
+            # point in
+            path.moveTo(-innerRadius,-outerRadius)
+            path.lineTo(0,-innerRadius)
+            path.lineTo(innerRadius,-outerRadius)
+            path.lineTo(-innerRadius,-outerRadius)
+        painter.fillPath(path,node.FAN_BRUSH)
+        
+        # Marriage fans
+        path1 = QPainterPath()
+        path2 = QPainterPath()
+        
+        if self.allSpouses == 0:
+            pass
+        elif self.hiddenSpouses > 0:
+            # point out
+            path1.moveTo(-innerRadius,-innerRadius)
+            path1.lineTo(-outerRadius,0)
+            path1.lineTo(-innerRadius,innerRadius)
+            path1.lineTo(-innerRadius,-innerRadius)
+            
+            path2.moveTo(innerRadius,-innerRadius)
+            path2.lineTo(outerRadius,0)
+            path2.lineTo(innerRadius,innerRadius)
+            path2.lineTo(innerRadius,-innerRadius)
+        else:
+            # point in
+            path1.moveTo(-outerRadius,-innerRadius)
+            path1.lineTo(-innerRadius,0)
+            path1.lineTo(-outerRadius,innerRadius)
+            path1.lineTo(-outerRadius,-innerRadius)
+            
+            path2.moveTo(outerRadius,-innerRadius)
+            path2.lineTo(innerRadius,0)
+            path2.lineTo(outerRadius,innerRadius)
+            path2.lineTo(outerRadius,-innerRadius)
+        painter.fillPath(path1,node.FAN_BRUSH)
+        painter.fillPath(path2,node.FAN_BRUSH)
+        
+        # Child fan
+        path = QPainterPath()
+        
+        if self.allChildren == 0:
+            pass
+        elif self.hiddenChildren > 0:
+            # point out
+            path.moveTo(-innerRadius,innerRadius)
+            path.lineTo(0,outerRadius)
+            path.lineTo(innerRadius,innerRadius)
+            path.lineTo(-innerRadius,innerRadius)
+        else:
+            # point in
+            path.moveTo(-innerRadius,outerRadius)
+            path.lineTo(0,innerRadius)
+            path.lineTo(innerRadius,outerRadius)
+            path.lineTo(-innerRadius,outerRadius)
+        painter.fillPath(path,node.FAN_BRUSH)
+    
+    def hoverEnterEvent(self, event):
+        self.panel.highlight(self.personID)
+    
+    def hoverLeaveEvent(self, event):
+        self.panel.highlight(None)
     
     def mousePressEvent(self, event):
         self.grabMouse()
@@ -209,7 +278,6 @@ class node(fadeableGraphicsItem):
     
     def mouseMoveEvent(self, event):
         self.setPos(event.scenePos())
-        self.panel.highlight(self.personID)
         # As moving a node will cause disruption, allow me (and consequently my neighbors) to move faster
         self.energy = node.MAX_ENERGY
     
@@ -299,10 +367,10 @@ class pedigreePanel:
     def highlight(self, person):
         if self.highlighted != person:
             if self.highlighted != None and self.g.node.has_key(self.highlighted) and not self.g.node[self.highlighted]['item'].dead:
-                self.g.node[self.highlighted]['item'].pen = node.DEFAULT_PEN
+                self.g.node[self.highlighted]['item'].highlighted = False
             self.highlighted = person
-            if self.g.node.has_key(self.highlighted) and not self.g.node[self.highlighted]['item'].dead:
-                self.g.node[self.highlighted]['item'].pen = node.HIGHLIGHT_PEN
+            if self.highlighted != None and self.g.node.has_key(self.highlighted) and not self.g.node[self.highlighted]['item'].dead:
+                self.g.node[self.highlighted]['item'].highlighted = True
     
     def addPeople(self, people):
         # Create the node objects, update the number of generations
@@ -342,29 +410,26 @@ class pedigreePanel:
         menu = QMenu(self.view)
         menu.addAction(u'Remove')
         
-        if item.hiddenParents > 0:
-            menu.addAction(u'Expand Parents')
-        elif item.allParents > 0:
-            menu.addAction(u'Collapse Parents')
-        else:
-            # TODO
+        if item.allParents == 0:
             menu.addAction(u'No Parents')
-        
-        if item.hiddenSpouses > 0:
-            menu.addAction(u'Expand Spouses')
-        elif item.allSpouses > 0:
-            menu.addAction(u'Collapse Spouses')
+        elif item.hiddenParents > 0:
+            menu.addAction(u'Expand Parents')
         else:
-            # TODO
+            menu.addAction(u'Collapse Parents')
+        
+        if item.allSpouses == 0:
             menu.addAction(u'No Spouses')
-        
-        if item.hiddenChildren > 0:
-            menu.addAction(u'Expand Children')
-        elif item.allChildren > 0:
-            menu.addAction(u'Collapse Children')
+        elif item.hiddenSpouses > 0:
+            menu.addAction(u'Expand Spouses')
         else:
-            # TODO
+            menu.addAction(u'Collapse Spouses')
+        
+        if item.allChildren == 0:
             menu.addAction(u'No Children')
+        elif item.hiddenChildren > 0:
+            menu.addAction(u'Expand Children')
+        else:
+            menu.addAction(u'Collapse Children')
         
         resultAction = menu.exec_(position)
         
@@ -412,7 +477,7 @@ class pedigreePanel:
             self.g.node[person]['item'].hiddenChildren = 0
             self.g.node[person]['item'].hiddenSpouses = 0
             for p,t in self.ped.iterNuclear(person):
-                if self.g.node.has_key(p):
+                if self.g.node.has_key(p) and not self.g.node[p]['item'].killed:
                     continue
                 elif t == self.ped.PARENT_TO_CHILD:
                     self.g.node[person]['item'].hiddenChildren += 1
@@ -525,7 +590,7 @@ class PythonTableWidgetItem(QTableWidgetItem):
 class TableWidget(QTableWidget):
     NORMAL_BG = QBrush(Qt.white)
     
-    MOUSE_OVER_BG = QBrush(Qt.green)
+    MOUSE_OVER_BG = QBrush(Qt.lightGray)
     
     MOUSE_META_BG = QBrush(Qt.gray)
     
