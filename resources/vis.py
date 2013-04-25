@@ -674,12 +674,12 @@ class TableWidget(QTableWidget):
                 self.item(self.mousedRow,c).setBackground(TableWidget.NORMAL_BG)
         self.mousedRow = None
 
-class Viz:
+class Vis:
     def __init__(self, ped):
         self.ped = ped
         
         self.loader = QUiLoader()
-        infile = QFile("utils/viz.ui")
+        infile = QFile("resources/vis.ui")
         infile.open(QFile.ReadOnly)
         self.window = self.loader.load(infile, None)
         infile.close()
@@ -745,5 +745,5 @@ class Viz:
     
 def run(ped):
     app = QApplication(sys.argv)
-    window = Viz(ped)
+    window = Vis(ped)
     return app.exec_()

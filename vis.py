@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-import argparse, webbrowser, shutil, os
-from utils.pedigree import Pedigree, gexf_node_attribute_mapper
+import argparse
+from resources.pedigree import Pedigree
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Visualizes an ego-pa-ma file; you should have run calculateD.py before running this.')
@@ -21,6 +21,6 @@ if __name__ == '__main__':
     print "Loading file..."
     ped = Pedigree(args.infile, countAndCalculate=False)
     print "Starting viz..."
-    from utils.viz import run
+    from resources.vis import run
     run(ped)
     print "Done."

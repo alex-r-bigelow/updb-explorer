@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import argparse, os
-from utils.pedigree import Pedigree, gexf_node_attribute_mapper
+from resources.pedigree import Pedigree, gexf_node_attribute_mapper
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Calculates Nicki\'s d statistic given an ego-pa-ma file.')

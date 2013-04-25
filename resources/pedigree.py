@@ -27,10 +27,15 @@ class Pedigree:
     
     KEY_ERROR = KeyError('dummy')
     
-    def __init__(self, path, countAndCalculate=True, zeroMissing=False):
+    NUM_STEPS = 5
+    
+    def __init__(self, path, countAndCalculate=True, zeroMissing=False, tickFunction=None, num_ticks=None):
         self.g = networkx.DiGraph()
         self.rowOrder = []
         self.extraNodeAttributes = []
+        
+        self.tickFunction = tickFunction
+        self.num_ticks = num_ticks
         
         # TODO: parse other file formats based on their extension
         self._parseEgoPaMa(path, countAndCalculate, zeroMissing)
@@ -39,6 +44,9 @@ class Pedigree:
             self._countAndCalculate()
     
     def _parseEgoPaMa(self, path, countAndCalculate, zeroMissing):
+        if self.tickFunction != None:
+            self.tickFunction(newMessage='Loading egoPaMa...',increment=0)
+        
         required_indices = {}
         reserved_indices = {}
         
@@ -140,6 +148,8 @@ class Pedigree:
             if p not in temp:
                 self.rowOrder.append(p)
                 temp.add(p)
+        if self.tickFunction != None:
+            self.tickFunction(increment=int(self.num_ticks/Pedigree.NUM_STEPS))
     
     def _countAndCalculate(self):
         # If I write my own dijkstra's, I can just toss this and use the real one
@@ -153,6 +163,8 @@ class Pedigree:
                     yield spouse
         
         # Flag roots and leaves, count descendants, collect affecteds, get starting point for generation counting
+        if self.tickFunction != None:
+            self.tickFunction(newMessage='Counting...',increment=0)
         generationStart = self.rowOrder[0]
         generationCount = 0
         for p in self.rowOrder:
@@ -170,8 +182,12 @@ class Pedigree:
                 generationStart = p
             # We need a consistent ordering of affecteds to calculate d
             self.setAttribute(p, 'n_local_aff', sorted(self.getAttribute(p, 'n_local_aff')))
+        if self.tickFunction != None:
+            self.tickFunction(increment=int(self.num_ticks/Pedigree.NUM_STEPS))
         
         # Calculate generations
+        if self.tickFunction != None:
+            self.tickFunction(newMessage='Assigning generations...',increment=0)
         generationVisitCount = len(self.rowOrder)
         while True:
             # Store the generation number, and keep track of how far up we go relative to us
@@ -196,8 +212,12 @@ class Pedigree:
                         break
             else:
                 break
+        if self.tickFunction != None:
+            self.tickFunction(increment=int(self.num_ticks/Pedigree.NUM_STEPS))
         
         # Calculate d
+        if self.tickFunction != None:
+            self.tickFunction(newMessage='Calculating d...',increment=0)
         for p in self.rowOrder:
             p_aff = self.getAttribute(p, 'n_local_aff')
             if len(p_aff) <= 1:
@@ -217,14 +237,20 @@ class Pedigree:
         # Okay, we don't need the lists anymore... just keep the counts
         for p in self.rowOrder:
             self.setAttribute(p, 'n_local_aff', len(self.getAttribute(p, 'n_local_aff')))
+        if self.tickFunction != None:
+            self.tickFunction(increment=int(self.num_ticks/Pedigree.NUM_STEPS))
         
         # Now add spouse links - if I write my own dijkstra's for this method, I can toss this last section too
+        if self.tickFunction != None:
+            self.tickFunction(newMessage='Adding spouse links...',increment=0)
         for p in self.rowOrder:
             paID = self.dad(p)
             maID = self.mom(p)
             if paID != None and maID != None:
                 self.g.add_edge(paID,maID,{'type':Pedigree.HUSBAND_TO_WIFE})
                 self.g.add_edge(maID,paID,{'type':Pedigree.WIFE_TO_HUSBAND})
+        if self.tickFunction != None:
+            self.tickFunction(increment=int(self.num_ticks/Pedigree.NUM_STEPS))
     
     def dad(self, person):
         for parent in self.iterParents(person):
