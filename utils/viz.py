@@ -11,6 +11,9 @@ from PySide.QtUiTools import QUiLoader
 window = None
 corpses = set()
 
+BOTTOM = 500
+RIGHT = 1900
+
 class fadeableGraphicsItem(QGraphicsItem):
     SPEED = 0.05
     HIDDEN_OPACITY = 0.25
@@ -127,9 +130,10 @@ class node(fadeableGraphicsItem):
     FAN_OPACITY = 0.5
     
     GENERATION_FORCE = 0.015
-    REPULSION_FORCE = 0.01
+    REPULSION_FORCE = 0.005
     MAX_ENERGY = 1.0
     ENERGY_DECAY = 0.0001
+    ENERGY_SWAP_THRESHOLD = 0.1
     
     def __init__(self, personID, panel, sex, startingX = None, startingY = None):
         fadeableGraphicsItem.__init__(self)
@@ -158,9 +162,9 @@ class node(fadeableGraphicsItem):
         
         # start off with random positions; TODO: figure out bounds
         if startingX == None:
-            startingX = random.randint(0,1900)
+            startingX = random.randint(0,RIGHT)
         if startingY == None:
-            startingY = random.randint(0,500)
+            startingY = random.randint(0,BOTTOM)
         self.setX(startingX)
         self.setY(startingY)
         
@@ -286,8 +290,15 @@ class node(fadeableGraphicsItem):
         self.ignoreForces = False
         self.dx = 0
         self.dy = 0
-        if event.button() == Qt.RightButton:
-            self.panel.contextMenu(self, event.scenePos().toPoint())
+        innerRadius = node.SIZE/2
+        x,y = event.pos().toTuple()
+        if x > -innerRadius and x < innerRadius:
+            if y < -innerRadius:
+                self.panel.expandOrCollapse(self,pedigreePanel.UP)
+            elif y > innerRadius:
+                self.panel.expandOrCollapse(self,pedigreePanel.DOWN)
+        elif (x < -innerRadius or x > innerRadius) and y > -innerRadius and y < innerRadius:
+            self.panel.expandOrCollapse(self,pedigreePanel.HORIZONTAL)
         
     def updateValues(self, neighbors):
         # Average every neighbor's energy with my own, then decay it a little
@@ -320,12 +331,21 @@ class node(fadeableGraphicsItem):
                 leftBound = max(ox,leftBound)
             elif ox > mx:
                 rightBound = min(ox,rightBound)
-        if rightBound-leftBound <= node.SIZE:
-            # Shoot, we're overlapping with someone else... try swapping places
-            if rightBound-mx > mx-leftBound:
-                distance = rightBound-mx+node.SIZE
+        if rightBound-mx <= node.SIZE or mx-leftBound <= node.SIZE:
+            # Shoot, we're overlapping with someone else... is our energy still high?
+            if self.energy > node.ENERGY_SWAP_THRESHOLD:
+                # Accelerate away
+                if rightBound-mx > mx-leftBound:
+                    distance = max(node.SIZE,mx-leftBound)**2
+                else:
+                    distance = -max(node.SIZE,rightBound-mx)**2
             else:
-                distance = leftBound-mx-node.SIZE
+                # Otherwise, try swapping places and boosting our energy a little
+                if rightBound-mx > mx-leftBound:
+                    distance = -max(node.SIZE,rightBound-mx)**2
+                else:
+                    distance = max(node.SIZE,mx-leftBound)**2
+                self.energy += node.ENERGY_SWAP_THRESHOLD
         else:
             distance = (leftBound+rightBound)*0.5-mx
         self.dx += node.REPULSION_FORCE*distance
@@ -372,14 +392,23 @@ class pedigreePanel:
             if self.highlighted != None and self.g.node.has_key(self.highlighted) and not self.g.node[self.highlighted]['item'].dead:
                 self.g.node[self.highlighted]['item'].highlighted = True
     
-    def addPeople(self, people):
+    def addPeople(self, people, direction = None):
         # Create the node objects, update the number of generations
         for p in people:
             if self.g.node.has_key(p):
                 n = self.g.node[p]['item']
                 n.revive()
             else:
-                n = node(p,self,self.ped.getAttribute(p,'sex','?'), startingX = 0)
+                startingX = None
+                startingY = None
+                if direction == pedigreePanel.UP:
+                    startingY = 0
+                elif direction == pedigreePanel.HORIZONTAL:
+                    startingX = 0
+                elif direction == pedigreePanel.DOWN:
+                    startingY = BOTTOM
+                
+                n = node(p,self,self.ped.getAttribute(p,'sex','?'), startingX, startingY)
                 n.allParents,n.allSpouses,n.allChildren = self.ped.countNuclear(p)
                 n.setZValue(1)
                 self.g.add_node(p, {'item':n})
@@ -404,54 +433,33 @@ class pedigreePanel:
         self.refreshGenerations()
         corpses = set() # painting happens in the same thread addPeople is in... we only want to release dead QGraphicsItems every once in a while
     
-    def contextMenu(self, item, position):
+    def expandOrCollapse(self, item, direction):
         if item.dead:
             return
-        menu = QMenu(self.view)
-        menu.addAction(u'Remove')
-        
-        if item.allParents == 0:
-            menu.addAction(u'No Parents')
-        elif item.hiddenParents > 0:
-            menu.addAction(u'Expand Parents')
-        else:
-            menu.addAction(u'Collapse Parents')
-        
-        if item.allSpouses == 0:
-            menu.addAction(u'No Spouses')
-        elif item.hiddenSpouses > 0:
-            menu.addAction(u'Expand Spouses')
-        else:
-            menu.addAction(u'Collapse Spouses')
-        
-        if item.allChildren == 0:
-            menu.addAction(u'No Children')
-        elif item.hiddenChildren > 0:
-            menu.addAction(u'Expand Children')
-        else:
-            menu.addAction(u'Collapse Children')
-        
-        resultAction = menu.exec_(position)
-        
-        if resultAction != None and resultAction != 0:
-            if resultAction.text() == u'Remove':
-                self.discardPeople(item.personID)
-            if resultAction.text() == u'Expand Parents':
-                self.addPeople(set(self.ped.iterParents(item.personID)))
-            elif resultAction.text() == u'Collapse Parents':
+        if direction == pedigreePanel.UP:
+            if item.allParents == 0:
+                return
+            elif item.hiddenParents > 0:
+                self.addPeople(set(self.ped.iterParents(item.personID)),pedigreePanel.UP)
+            else:
                 self.discardPeople(set(self.ped.iterParents(item.personID)))
                 self.cleanUp(item.personID)
-            elif resultAction.text() == u'Expand Spouses':
-                self.addPeople(set(self.ped.iterSpouses(item.personID)))
-            elif resultAction.text() == u'Collapse Spouses':
+        elif direction == pedigreePanel.HORIZONTAL:
+            if item.allSpouses == 0:
+                return
+            elif item.hiddenSpouses > 0:
+                self.addPeople(set(self.ped.iterSpouses(item.personID)),pedigreePanel.HORIZONTAL)
+            else:
                 self.discardPeople(set(self.ped.iterSpouses(item.personID)))
                 self.cleanUp(item.personID)
-            elif resultAction.text() == u'Expand Children':
-                self.addPeople(set(self.ped.iterChildren(item.personID)))
-            elif resultAction.text() == u'Collapse Children':
+        elif direction == pedigreePanel.DOWN:
+            if item.allChildren == 0:
+                return
+            elif item.hiddenChildren > 0:
+                self.addPeople(set(self.ped.iterChildren(item.personID)),pedigreePanel.DOWN)
+            else:
                 self.discardPeople(set(self.ped.iterChildren(item.personID)))
                 self.cleanUp(item.personID)
-            # TODO: clean up discarded people
     
     def cleanUp(self, person):
         # throw away any connected components that aren't connected to person
@@ -523,7 +531,7 @@ class pedigreePanel:
         if self.minGen == None:
             return
         
-        bottom = 500    # TODO: get this size differently somehow...
+        bottom = BOTTOM    # TODO: get this size differently somehow...
         offset = node.SIZE*0.5 # center-based drawing
         increment = bottom / (max(self.maxGen-self.minGen+1,2))
         
@@ -573,7 +581,7 @@ class pedigreePanel:
         for p,attrs in self.g.node.iteritems():
             connectedEdges = set(attrs['item'] for attrs in self.g.edge[p].itervalues())
             generationNodes = set(self.g.node[r]['item'] for r in self.generations[self.ped.getAttribute(p,'generation',self.maxGen)])
-            attrs['item'].applyForces(connectedEdges,generationNodes,0,1900)  # TODO: find these sizes differently somehow...
+            attrs['item'].applyForces(connectedEdges,generationNodes,0,RIGHT)  # TODO: find these sizes differently somehow...
         self.scene.update()
 
 class PythonTableWidgetItem(QTableWidgetItem):
