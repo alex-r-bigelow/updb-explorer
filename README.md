@@ -6,11 +6,11 @@ Running
 -------
 For now, there's a lame GUI front end in the precompiled binaries:
 
-[Mac OS X v1.0](http://sci.utah.edu/~abigelow/Downloads/expressionTopology/Mac/expressionTopology_1.0.dmg)
+[Mac OS X v1.0](http://sci.utah.edu/~abigelow/Downloads/updb-explorer/Mac/updb-explorer_0.1.0.dmg)
 
-[Linux v1.0](http://sci.utah.edu/~abigelow/Downloads/expressionTopology/Linux/expressionTopology_1.0.tar.gz)
+[Linux v1.0](http://sci.utah.edu/~abigelow/Downloads/updb-explorer/Linux/updb-explorer_0.1.0.tar.gz)
 
-[Windows v1.0](http://sci.utah.edu/~abigelow/Downloads/expressionTopology/Windows/expressionTopology_1.0.zip)
+[Windows v1.0](http://sci.utah.edu/~abigelow/Downloads/updb-explorer/Windows/updb-explorer_0.1.0.zip)
 
 If you'd prefer to run from the source code, you will need to install Qt, Python 2.7, PySide, networkx and clone this repository. The same GUI can then be launched via:
 
