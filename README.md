@@ -4,7 +4,7 @@ A system for exploring bite-size pieces of large pedigrees, specifically designe
 
 Running
 -------
-For now, there's a lame GUI front end in the precompiled binaries:
+To visualize a file, you first need to add some statistics as extra columns (particularly the "generation" column). Use the "calculateD" program to do this. Once your file has this information, you can run the "vis" program from the same GUI. Don't get too comfortable with the intro GUI - I'm sure we'll change it extensively!
 
 [Mac OS X v1.0](http://sci.utah.edu/~abigelow/Downloads/updb-explorer/Mac/updb-explorer_0.1.0.dmg)
 
@@ -23,4 +23,7 @@ Or from the command line:
 or
 
 	python vis.py
-	
+
+Issues
+------
+If you run into any problems, please use Github's "Issues" feature! Or send an email to alex dot bigelow at utah dot edu.
