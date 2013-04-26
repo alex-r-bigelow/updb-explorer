@@ -29,6 +29,7 @@ class loading:
                          'is_leaf':self.window.is_leaf,
                          'generation':self.window.generation}
         self.header = []
+        self.lowerHeader = []
         
         self.window.browseInputButton.clicked.connect(self.browseInput)
         self.window.browseOutputButton.clicked.connect(self.browseOutput)
@@ -56,14 +57,20 @@ class loading:
             for b in self.overrides.itervalues():
                 b.clear()
             self.header = []
+            self.lowerHeader = []
         else:
             with open(fileName,'rb') as infile:
                 self.header = infile.readline().strip().split('\t')
+                for h in self.header:
+                    self.lowerHeader.append(h.lower())
+                print self.lowerHeader
             infile.close()
             for d,b in self.overrides.iteritems():
                 b.addItems(self.header)
                 if d in self.header:
                     b.setEditText(d)
+                elif d.lower() in self.lowerHeader:
+                    b.setEditText(self.header[self.lowerHeader.index(d.lower())])
                 else:
                     b.setEditText('')
         

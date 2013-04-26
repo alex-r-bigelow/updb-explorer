@@ -21,7 +21,7 @@ python setup.py py2app
 echo 'Moving files around...'
 # move the auto-generated programs and packages around
 mv dist $APP_NAME
-#rm -rf build
+rm -rf build
 # move the svg and ui elements into the appropriate folders
 cd $APP_NAME/$APP_NAME.app/Contents/Resources
 touch qt.conf
@@ -35,5 +35,5 @@ cp README.md $APP_NAME/
 
 echo 'Bundling...'
 hdiutil create -volname $APP_NAME -srcfolder $APP_NAME/ -ov -format UDZO $APP_NAME$VERSION.dmg
-#rm -rf $APP_NAME
+rm -rf $APP_NAME
 mv $APP_NAME$VERSION.dmg $STARTING_DIR
