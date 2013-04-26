@@ -718,8 +718,8 @@ class Vis:
         self.window.dataTable.setMouseTracking(True)
         self.window.dataTable.viewport().setMouseTracking(True)
         
-        #self.window.showMaximized()
-        self.window.showFullScreen()
+        self.window.showMaximized()
+        #self.window.showFullScreen()
     
     def highlight(self, person):
         self.pedigreeView.highlight(person)
