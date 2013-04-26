@@ -63,7 +63,6 @@ class loading:
                 self.header = infile.readline().strip().split('\t')
                 for h in self.header:
                     self.lowerHeader.append(h.lower())
-                print self.lowerHeader
             infile.close()
             for d,b in self.overrides.iteritems():
                 b.addItems(self.header)

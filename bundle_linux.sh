@@ -23,9 +23,8 @@ echo 'Moving files around...'
 # move the auto-generated programs and packages around
 mv dist $APP_NAME
 # copy the svg and ui elements manually
-cp $APP_NAME.ui $APP_NAME
 mkdir $APP_NAME/resources
-cp -r resources/*.ui $APP_NAME
+cp -r resources/*.ui $APP_NAME/resources
 cd build/exe*
 mv * ../../$APP_NAME
 cd ../..
