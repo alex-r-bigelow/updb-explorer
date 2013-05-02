@@ -4,12 +4,14 @@ Created on Apr 3, 2013
 @author: Alex Bigelow
 '''
 import sys, random, networkx
-from PySide.QtGui import QApplication, QGraphicsScene, QGraphicsItem, QPen, QBrush, QColor, QPainterPath, QTableWidget, QTableWidgetItem, QMenu
+from PySide.QtGui import QApplication, QGraphicsScene, QGraphicsItem, QPen, QBrush, QColor, QPainterPath, QTableWidget, QTableWidgetItem, QPainter, QHeaderView
 from PySide.QtCore import Qt, QFile, QRectF, QTimer
 from PySide.QtUiTools import QUiLoader
 
 window = None
 corpses = set()
+
+OVERLAY_ATTRIBUTE = None
 
 BOTTOM = 500
 RIGHT = 1900
@@ -120,9 +122,17 @@ class node(fadeableGraphicsItem):
     HIGHLIGHT_PEN = QPen(Qt.black, 5)
     
     DEFAULT_BRUSH = QBrush(Qt.darkGray)
-    AFFECTED_BRUSH = QBrush(Qt.red)
-    ANCESTOR_BRUSH = QBrush(Qt.black)
-    
+    CATEGORICAL_BRUSHES = [QColor(253, 191, 111),
+                           QColor(255, 127, 0),
+                           QColor(202, 178, 214),
+                           QColor(106, 61, 154),
+                           QColor(255, 255, 153),
+                           QColor(166, 206, 227),
+                           QColor(31, 120, 180),
+                           QColor(178, 223, 138),
+                           QColor(51, 160, 44),
+                           QColor(251, 154, 153),
+                           QColor(227, 26, 28)]
     SIZE = 12
     FAN_SIZE = 36
     FAN_PEN = QPen(Qt.black, 0)
@@ -168,9 +178,6 @@ class node(fadeableGraphicsItem):
         self.setX(startingX)
         self.setY(startingY)
         
-        self.pen = node.DEFAULT_PEN
-        self.brush = node.DEFAULT_BRUSH
-    
     def boundingRect(self):
         radius = node.FAN_SIZE*0.5
         return QRectF(-radius,-radius,node.FAN_SIZE,node.FAN_SIZE)
@@ -185,13 +192,21 @@ class node(fadeableGraphicsItem):
             painter.setPen(node.DEFAULT_PEN)
         painter.setOpacity(self.opacity)
         
+        pOrC = self.panel.getPorC(self.personID)
+        if pOrC == None:
+            brush = node.DEFAULT_BRUSH
+        elif isinstance(pOrC,float):
+            brush = QBrush(QColor(255*pOrC,0,0))
+        else:
+            brush = node.CATEGORICAL_BRUSHES[pOrC]
+        
         if self.sex == node.MALE:
-            painter.fillRect(-radius,-radius,node.SIZE,node.SIZE,self.brush)
+            painter.fillRect(-radius,-radius,node.SIZE,node.SIZE,brush)
             #painter.drawRect(-radius,-radius,node.SIZE,node.SIZE)
         elif self.sex == node.FEMALE:
             path = QPainterPath()
             path.addEllipse(-radius,-radius,node.SIZE,node.SIZE)
-            painter.fillPath(path,self.brush)
+            painter.fillPath(path,brush)
             #painter.drawPath(path)
         else:
             raise Exception('Unknown sex.')
@@ -384,6 +399,10 @@ class pedigreePanel:
         
         self.highlighted = None
     
+    def getPorC(self, personID):
+        global OVERLAY_ATTRIBUTE
+        return self.ped.getAttributeProportionOrClass(personID,OVERLAY_ATTRIBUTE)
+    
     def highlight(self, person):
         if self.highlighted != person:
             if self.highlighted != None and self.g.node.has_key(self.highlighted) and not self.g.node[self.highlighted]['item'].dead:
@@ -393,6 +412,7 @@ class pedigreePanel:
                 self.g.node[self.highlighted]['item'].highlighted = True
     
     def addPeople(self, people, direction = None):
+        global corpses
         # Create the node objects, update the number of generations
         for p in people:
             if self.g.node.has_key(p):
@@ -595,6 +615,42 @@ class PythonTableWidgetItem(QTableWidgetItem):
     def __lt__(self, other):
         return self.sortKey < other.sortKey
 
+class CustomHeader(QHeaderView):
+    OVERLAY = Qt.red
+    OVERLAY_OPACITY = 0.25
+    
+    def __init__(self, orientation, parent=None):
+        QHeaderView.__init__(self, orientation, parent=None)
+        self.setClickable(True)
+        self.setMovable(True)
+        self.overlayIndex = None
+    
+    def paintSection(self, painter, rect, logicalIndex):
+        painter.save()
+        QHeaderView.paintSection(self, painter, rect, logicalIndex)
+        painter.restore()
+        if logicalIndex == self.overlayIndex:
+            painter.setOpacity(CustomHeader.OVERLAY_OPACITY)
+            painter.fillRect(rect,CustomHeader.OVERLAY)
+    
+    def mouseReleaseEvent(self, event):
+        lastOverlay = self.overlayIndex
+        nextIndex = self.logicalIndex(self.visualIndexAt(event.pos().x()))
+        
+        if nextIndex == lastOverlay:
+            self.overlayIndex = None
+        else:
+            self.overlayIndex = nextIndex
+        
+        self.parent().setOverlay(self.overlayIndex)
+        
+        if not lastOverlay == None:
+            self.updateSection(lastOverlay)
+        if not nextIndex == None:
+            self.updateSection(nextIndex)
+        
+        QHeaderView.mouseReleaseEvent(self, event)
+
 class TableWidget(QTableWidget):
     NORMAL_BG = QBrush(Qt.white)
     
@@ -610,6 +666,9 @@ class TableWidget(QTableWidget):
         QTableWidget.__init__(self)
         self.mainApp = mainApp
         
+        self.headerObj = CustomHeader(Qt.Horizontal, self)
+        self.setHorizontalHeader(self.headerObj)
+        
         self.setEditTriggers(QTableWidget.NoEditTriggers)
         self.setSelectionMode(QTableWidget.NoSelection)
         self.setSelectionBehavior(QTableWidget.SelectRows)
@@ -619,12 +678,19 @@ class TableWidget(QTableWidget):
         self.mousedRow = None
         self.activeIDs = set()
     
+    def setOverlay(self, index):
+        global OVERLAY_ATTRIBUTE
+        if index == None:
+            OVERLAY_ATTRIBUTE = index
+        else:
+            OVERLAY_ATTRIBUTE = self.horizontalHeaderItem(index).text()
+    
     def setItem(self, row, column, item):
         QTableWidget.setItem(self,row,column,item)
         item.setBackground(TableWidget.NORMAL_BG)
         self.numColumns = max(column,self.numColumns)
     
-    def mouseReleaseEvent(self, event):
+    def mouseDoubleClickEvent(self, event):
         k = QApplication.keyboardModifiers()
         m = event.button()
         currentRow = self.rowAt(event.y())
@@ -701,15 +767,16 @@ class Vis:
         self.window.lowSplitter.update()
         
         # Load up all the data into the spreadsheet
-        headers = [self.ped.REQUIRED_KEYS['personID']]
-        headers.extend(self.ped.extraNodeAttributes)
-        self.window.dataTable.setColumnCount(len(headers))
+        self.headers = [self.ped.REQUIRED_KEYS['personID']]
+        self.headers.extend(self.ped.extraNodeAttributes)
+        self.window.dataTable.setColumnCount(len(self.headers))
         self.window.dataTable.setRowCount(len(self.ped.rowOrder))
-        self.window.dataTable.setHorizontalHeaderLabels(headers)
+        self.window.dataTable.setHorizontalHeaderLabels(self.headers)
         for r,p in enumerate(self.ped.rowOrder):
             self.window.dataTable.setItem(r,0,PythonTableWidgetItem(p))
             for c,a in enumerate(self.ped.extraNodeAttributes):
                 self.window.dataTable.setItem(r,c+1,PythonTableWidgetItem(self.ped.getAttribute(p,a,None)))
+        self.overlayAttribute = None
         
         # Set up the pedigree view
         self.pedigreeView = pedigreePanel(self.window.pedigreeView, self.ped)

@@ -1,5 +1,71 @@
 import networkx, sys, math
 
+class attributeDetails:
+    def __init__(self, maxCategories):
+        self.range = (None,None)
+        self.categories = []
+                
+        self.maxCategories = maxCategories
+        
+        self.maxedOut = False
+    
+    def addArbitraryValue(self, f):
+        if f == None:
+            return
+        try:
+            f = float(f)
+            if math.isnan(f):
+                self.addCategory('NaN')
+            elif math.isinf(f):
+                self.addCategory("Inf")
+            else:
+                self.addValue(f)
+        except ValueError:
+            self.addCategory(f)
+    
+    def addValue(self, v):
+        if self.range[0] == None:
+            self.range = (v,v)
+        else:
+            self.range = (min(v,self.range[0]),max(v,self.range[1]))
+    
+    def addCategory(self, v):
+        if self.maxedOut:
+            return
+        
+        self.categories.append(v)
+        
+        if self.maxCategories > 0 and len(self.categories) > self.maxCategories:
+            self.maxedOut = True
+    
+    def _getProportion(self, v):
+        if self.range[0] == None:
+            return None
+        elif self.range[1]-self.range[0] == 0:
+            return 1.0
+        else:
+            return (v-self.range[0])/float(self.range[1]-self.range[0])
+    
+    def _getClass(self, v):
+        if not v in self.categories:
+            return None
+        else:
+            return self.categories.index(v)
+    
+    def getProportionOrClass(self, f):
+        if f == None:
+            return None
+        try:
+            f = float(f)
+            if math.isnan(f):
+                return self._getClass('NaN')
+            elif math.isinf(f):
+                return self._getClass("Inf")
+            else:
+                return self._getProportion(f)
+        except ValueError:
+            self._getClass(f)
+
 class Pedigree:
     CHILD_TO_PARENT = 1
     PARENT_TO_CHILD = 2
@@ -29,10 +95,14 @@ class Pedigree:
     
     NUM_STEPS = 5
     
+    MAX_CATEGORIES = 11
+    
     def __init__(self, path, countAndCalculate=True, zeroMissing=False, tickFunction=None, num_ticks=None):
         self.g = networkx.DiGraph()
         self.rowOrder = []
         self.extraNodeAttributes = []
+        
+        self.attrDetails = {}
         
         self.tickFunction = tickFunction
         self.num_ticks = num_ticks
@@ -66,7 +136,7 @@ class Pedigree:
         with open(path,'rb') as infile:
             header = None
             for line in infile:
-                columns = line.strip().split('\t')
+                columns = line.strip().split()
                 if header == None:
                     header = columns
                     for k,v in Pedigree.REQUIRED_KEYS.iteritems():
@@ -81,6 +151,8 @@ class Pedigree:
                         else:
                             reserved_indices[k] = len(header)
                             header.append(v)
+                    for h in header:
+                        self.attrDetails[h] = attributeDetails(Pedigree.MAX_CATEGORIES)
                     self.extraNodeAttributes = list(header)
                     self.extraNodeAttributes.pop(required_indices['personID'])
                     continue
@@ -104,6 +176,10 @@ class Pedigree:
                                 attribs[i] = '?'
                             else:
                                 attribs[i] = a.upper()[0]
+                                if attribs[i] == '1':
+                                    attribs[i] = 'M'
+                                elif attribs[i] == '2':
+                                    attribs[i] = 'F'
                         elif i == required_indices['affected'] or i == reserved_indices.get('is_root',None) or i == reserved_indices.get('is_leaf',None):
                             if a != '0' and a != '1':
                                 attribs[i] = None
@@ -141,6 +217,10 @@ class Pedigree:
                     if not countAndCalculate and paID != '0' and maID != '0':
                         self.g.add_edge(paID,maID,{'type':Pedigree.HUSBAND_TO_WIFE})
                         self.g.add_edge(maID,paID,{'type':Pedigree.WIFE_TO_HUSBAND})
+                    
+                    # Finally keep track of the kinds of data we've seen
+                    for a,v in self.g.node[personID].iteritems():
+                        self.attrDetails[a].addArbitraryValue(v)
         infile.close()
         # Need to also add ancestors that are mentioned but not explicitly detailed in the file
         temp = set(self.rowOrder)
@@ -362,6 +442,12 @@ class Pedigree:
         for child in self.iterChildren(person):
             return False
         return True
+    
+    def getAttributeProportionOrClass(self, p, a):
+        if not self.attrDetails.has_key(a):
+            return None
+        v = self.getAttribute(p,a,None)
+        return self.attrDetails[a].getProportionOrClass(v)
     
     def getAttribute(self, p, a, default=KEY_ERROR):
         a = Pedigree.REQUIRED_KEYS.get(a,a)

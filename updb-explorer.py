@@ -52,6 +52,10 @@ class loading:
     def browseInput(self):
         fileName = QFileDialog.getOpenFileName(caption=u"Open file")[0]
         self.window.inputField.setText(fileName)
+        self.updateOverrides()
+    
+    def updateOverrides(self):
+        fileName = self.window.inputField.text()
         if not os.path.exists(fileName):
             self.window.buttonBox.setEnabled(False)
             for b in self.overrides.itervalues():
@@ -86,9 +90,12 @@ class loading:
             self.window.outputArea.setEnabled(True)
             self.window.generateLabel.show()
         else:
+            self.window.inputField.setText(self.window.outputField.text())
+            self.window.outputField.setText("")
             self.window.buttonBox.setEnabled(os.path.exists(self.window.inputField.text()))
             self.window.outputArea.setEnabled(False)
             self.window.generateLabel.hide()
+        self.updateOverrides()
     
     def go(self):
         for k in Pedigree.REQUIRED_KEYS.keys():
