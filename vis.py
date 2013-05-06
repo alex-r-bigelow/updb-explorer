@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import argparse
-from resources.pedigree import Pedigree
+from resources.pedigree_data import Pedigree
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Visualizes an ego-pa-ma file; you should have run calculateD.py before running this.')
@@ -21,6 +21,6 @@ if __name__ == '__main__':
     print "Loading file..."
     ped = Pedigree(args.infile, countAndCalculate=False)
     print "Starting viz..."
-    from resources.vis import run
+    from resources.main_app import run
     run(ped)
     print "Done."

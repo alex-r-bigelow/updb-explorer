@@ -1,6 +1,17 @@
 import networkx, sys, math
 
-class attributeDetails:
+class AttributeFilter(object):
+    def __init__(self, details, notifier):
+        self.details = details
+        self.notifier = notifier
+        self.ranges = []
+        if self.details.range[0] != None:
+            self.ranges.append(self.details.range)
+        self.categories = {}
+        for c in self.details.categories:
+            self.categories[c] = True
+
+class AttributeDetails(object):
     def __init__(self, maxCategories):
         self.range = (None,None)
         self.categories = []
@@ -66,7 +77,7 @@ class attributeDetails:
         except ValueError:
             self._getClass(f)
 
-class Pedigree:
+class Pedigree(object):
     CHILD_TO_PARENT = 1
     PARENT_TO_CHILD = 2
     HUSBAND_TO_WIFE = 3
@@ -95,7 +106,7 @@ class Pedigree:
     
     NUM_STEPS = 5
     
-    MAX_CATEGORIES = 11
+    MAX_CATEGORIES = 12
     
     def __init__(self, path, countAndCalculate=True, zeroMissing=False, tickFunction=None, num_ticks=None):
         self.g = networkx.DiGraph()
@@ -152,7 +163,7 @@ class Pedigree:
                             reserved_indices[k] = len(header)
                             header.append(v)
                     for h in header:
-                        self.attrDetails[h] = attributeDetails(Pedigree.MAX_CATEGORIES)
+                        self.attrDetails[h] = AttributeDetails(Pedigree.MAX_CATEGORIES)
                     self.extraNodeAttributes = list(header)
                     self.extraNodeAttributes.pop(required_indices['personID'])
                     continue
@@ -443,11 +454,11 @@ class Pedigree:
             return False
         return True
     
-    def getAttributeProportionOrClass(self, p, a):
-        if not self.attrDetails.has_key(a):
+    def getLink(self, s, t):
+        if not self.g.edge[s].has_key(t):
             return None
-        v = self.getAttribute(p,a,None)
-        return self.attrDetails[a].getProportionOrClass(v)
+        else:
+            return self.g.edge[s][t]['type']
     
     def getAttribute(self, p, a, default=KEY_ERROR):
         a = Pedigree.REQUIRED_KEYS.get(a,a)

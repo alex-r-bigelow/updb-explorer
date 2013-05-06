@@ -2,14 +2,14 @@ import sys, os, traceback
 from PySide.QtGui import QApplication, QMessageBox, QFileDialog, QProgressDialog
 from PySide.QtCore import Qt, QFile
 from PySide.QtUiTools import QUiLoader
-from resources.pedigree import Pedigree, gexf_node_attribute_mapper
+from resources.pedigree_data import Pedigree, gexf_node_attribute_mapper
 
 NUM_TICKS = 100
 
 class cancelException(Exception):
     pass
 
-class loading:
+class loading(object):
     def __init__(self):
         self.loader = QUiLoader()
         infile = QFile("resources/loading.ui")
@@ -124,9 +124,9 @@ class loading:
         try:
             if self.window.programBox.currentText() == 'vis':
                 ped = Pedigree(self.window.inputField.text(), countAndCalculate=False, zeroMissing=self.window.zeroMissingBox.isChecked())
-                from resources.vis import Vis
+                from resources.main_app import App
                 self.window.hide()
-                visWindow = Vis(ped)
+                visWindow = App(ped)
                 self.window.close()
             else:
                 progress = QProgressDialog(u"Running...", u"Cancel", 0, NUM_TICKS, parent=None)
