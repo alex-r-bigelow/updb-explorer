@@ -356,7 +356,7 @@ class clusterTarget(fadeableGraphicsItem):
         self.setZValue(3)
     
     def boundingRect(self):
-        return QRectF(-clusterTarget.RADIUS,-clusterTarget.RADIUS,clusterTarget.RADIUS,clusterTarget.RADIUS)
+        return QRectF(-clusterTarget.RADIUS,-clusterTarget.RADIUS,clusterTarget.RADIUS*2,clusterTarget.RADIUS*2)
     
     def paint(self, painter, option, widget=None):
         painter.setOpacity(self.opacity*clusterTarget.MAX_OPACITY)
@@ -403,9 +403,9 @@ class clusterTarget(fadeableGraphicsItem):
         # QPainter.drawStaticText isn't supported in pyside, so this is an ugly workaround
         painter.drawText(-clusterTarget.RADIUS,-clusterTarget.RADIUS,clusterTarget.RADIUS*2,clusterTarget.RADIUS*2,
                          Qt.AlignVCenter | Qt.AlignHCenter, s)
-    
+        
     def mouseDoubleClickEvent(self, event):
-        if self.panel.appState.secondRoot != None and event.button() == Qt.LeftButton:
+        if not self.killed and event.button() == Qt.LeftButton:
             if self.clusterType == clusterTarget.FIRST_ROOT:
                 self.panel.appState.showSecondRoot(None)
             elif self.clusterType == clusterTarget.SECOND_ROOT:
@@ -420,8 +420,6 @@ class clusterTarget(fadeableGraphicsItem):
                 self.panel.appState.showSecondRoot(None)
                 self.panel.appState.setRoot(None)
                 self.panel.appState.tweakVisibleSet(result)
-        else:
-            return QGraphicsItem.mouseDoubleClickEvent(self,event)
 
 class edgeLayer(QGraphicsItem):
     def __init__(self, panel):
