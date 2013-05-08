@@ -61,7 +61,7 @@ if sys.platform == 'win32':
     
     GUI2Exe_Target_1 = Target(
         # what to build
-        script = "updb_explorer.py",
+        script = "updb-explorer.py",
         icon_resources = icon_resources,
         bitmap_resources = bitmap_resources,
         other_resources = other_resources,
@@ -162,7 +162,7 @@ elif sys.platform == 'darwin':
     
     setup(
     
-        app = [r'updb_explorer.py'],
+        app = [r'updb-explorer.py'],
         setup_requires=['py2app'],
         
         options = {"py2app": {"optimize": 0,
@@ -235,7 +235,7 @@ elif sys.platform == 'linux2':
     
     GUI2Exe_Target_1 = Executable(
         # what to build
-        script = "updb_explorer.py",
+        script = "updb-explorer.py",
         initScript = None,
         base = None,
         targetDir = r"dist",
@@ -283,7 +283,7 @@ else:
     print "Building an executable for platform %s is not supported yet!" % sys.platform
     print "You should be able to run the app by typing:"
     print ""
-    print "python updb_explorer.py"
+    print "python updb-explorer.py"
     print ""
     print "at the command line. If you want to help out, feel free to contribute on Github!"
     sys.exit(1)
