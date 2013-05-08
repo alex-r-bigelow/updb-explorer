@@ -5,6 +5,7 @@ from PySide.QtUiTools import QUiLoader
 from resources.pedigree_data import Pedigree, gexf_node_attribute_mapper
 
 NUM_TICKS = 100
+visWindow = None
 
 class cancelException(Exception):
     pass
@@ -32,7 +33,9 @@ class loading(object):
         self.lowerHeader = []
         
         self.window.browseInputButton.clicked.connect(self.browseInput)
+        self.window.inputField.textChanged.connect(self.switchPrograms)
         self.window.browseOutputButton.clicked.connect(self.browseOutput)
+        self.window.outputField.textChanged.connect(self.switchPrograms)
         self.window.programBox.currentIndexChanged.connect(self.switchPrograms)
         self.window.runButton.clicked.connect(self.go)
         
@@ -52,7 +55,7 @@ class loading(object):
     def browseInput(self):
         fileName = QFileDialog.getOpenFileName(caption=u"Open file")[0]
         self.window.inputField.setText(fileName)
-        self.updateOverrides()
+        self.switchPrograms()
     
     def updateOverrides(self):
         fileName = self.window.inputField.text()
@@ -76,8 +79,6 @@ class loading(object):
                     b.setEditText(self.header[self.lowerHeader.index(d.lower())])
                 else:
                     b.setEditText('')
-        
-        self.switchPrograms()
     
     def browseOutput(self):
         fileName = QFileDialog.getSaveFileName(caption=u"Save file")[0]
@@ -90,14 +91,13 @@ class loading(object):
             self.window.outputArea.setEnabled(True)
             self.window.generateLabel.show()
         else:
-            self.window.inputField.setText(self.window.outputField.text())
-            self.window.outputField.setText("")
             self.window.buttonBox.setEnabled(os.path.exists(self.window.inputField.text()))
             self.window.outputArea.setEnabled(False)
             self.window.generateLabel.hide()
         self.updateOverrides()
     
     def go(self):
+        global visWindow
         for k in Pedigree.REQUIRED_KEYS.keys():
             t = self.overrides[k].currentText()
             if t == '':
@@ -123,7 +123,10 @@ class loading(object):
         
         try:
             if self.window.programBox.currentText() == 'vis':
-                ped = Pedigree(self.window.inputField.text(), countAndCalculate=False, zeroMissing=self.window.zeroMissingBox.isChecked())
+                fileName = self.window.inputField.text()
+                if fileName.lower().endswith('.gexf') or fileName.lower().endswith('.json'):
+                    raise Exception('.gexf and .json formats are not supported for the vis program. Use calculateD to create a .dat file.')
+                ped = Pedigree(fileName, countAndCalculate=False, zeroMissing=self.window.zeroMissingBox.isChecked())
                 from resources.main_app import App
                 self.window.hide()
                 visWindow = App(ped)
@@ -157,6 +160,10 @@ class loading(object):
                     ped.write_egopama(self.window.outputField.text())
                 
                 progress.close()
+                
+                self.window.inputField.setText(self.window.outputField.text())
+                self.window.outputField.setText("")
+                self.window.programBox.setCurrentIndex(1)
         except Exception, e:
             if not isinstance(e, cancelException):
                 self.displayError("An unexpected error occurred.",traceback.format_exc())

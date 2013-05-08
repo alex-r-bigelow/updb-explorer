@@ -234,11 +234,12 @@ class Pedigree(object):
                         self.attrDetails[a].addArbitraryValue(v)
         infile.close()
         # Need to also add ancestors that are mentioned but not explicitly detailed in the file
-        temp = set(self.rowOrder)
-        for p in self.g.node.iterkeys():
-            if p not in temp:
-                self.rowOrder.append(p)
-                temp.add(p)
+        if not zeroMissing:
+            temp = set(self.rowOrder)
+            for p in self.g.node.iterkeys():
+                if p not in temp:
+                    self.rowOrder.append(p)
+                    temp.add(p)
         if self.tickFunction != None:
             self.tickFunction(increment=int(self.num_ticks/Pedigree.NUM_STEPS))
     
@@ -626,6 +627,8 @@ class Pedigree(object):
             outfile.write('\t'.join(self.extraNodeAttributes))
             outfile.write('\n')
             for p in self.rowOrder:
+                if not isinstance(p,str):
+                    print str(p)
                 outfile.write(p)
                 
                 dad = self.dad(p)

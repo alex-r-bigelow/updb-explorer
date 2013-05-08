@@ -1,5 +1,5 @@
-import random
-from PySide.QtGui import QGraphicsScene, QGraphicsItem, QPen, QBrush, QColor, QPainterPath
+import random, math
+from PySide.QtGui import QGraphicsScene, QGraphicsItem, QPen, QBrush, QFont, QPainterPath
 from PySide.QtCore import Qt, QRectF, QTimer
 from app_state import AppComponent
 from pedigree_data import Pedigree
@@ -52,6 +52,14 @@ class fadeableGraphicsItem(QGraphicsItem):
         self.fadingIn = False
         self.fadingOut = True
     
+    def forceDead(self):
+        self.hiding = False
+        self.killed = True
+        self.dead = True
+        self.fadingIn = False
+        self.fadingOut = False
+        self.opacity = 0.0
+    
     def revive(self):
         self.dead = False
         self.killed = False
@@ -73,10 +81,13 @@ class node(fadeableGraphicsItem):
     HORIZONTAL_FORCE = 0.005
     VERTICAL_FORCE = 0.03
     GENERATION_FORCE = 0.015
-    REPULSION_FORCE = 0.005
+    CLUSTER_FORCE = 0.03
+    CLUSTER_SCALE = 0.35
+    REPULSION_FORCE = 0.01
     MAX_ENERGY = 1.0
     ENERGY_DECAY = 0.0001
     ENERGY_SWAP_THRESHOLD = 0.1
+    CLUSTER_ENERGY = 0.5
     
     def __init__(self, personID, panel, sex, startingX = None, startingY = None):
         fadeableGraphicsItem.__init__(self)
@@ -106,8 +117,8 @@ class node(fadeableGraphicsItem):
             startingX = random.randint(0,self.panel.right)
         if startingY == None:
             startingY = random.randint(0,self.panel.bottom)
-        self.setX(startingX)
-        self.setY(startingY)
+        self.setPos(startingX,startingY)
+        self.setZValue(2)
         
     def boundingRect(self):
         radius = node.FAN_SIZE*0.5
@@ -205,37 +216,47 @@ class node(fadeableGraphicsItem):
             raise Exception('Unknown sex.')
     
     def hoverEnterEvent(self, event):
-        self.panel.appState.changeHighlightedNode(self.personID)
+        if self.panel.getClusterCenter(self.personID) == None:
+            self.panel.appState.changeHighlightedNode(self.personID)
     
     def hoverLeaveEvent(self, event):
-        self.panel.appState.changeHighlightedNode(None)
+        if self.panel.getClusterCenter(self.personID) == None:
+            self.panel.appState.changeHighlightedNode(None)
     
     def mouseDoubleClickEvent(self, event):
-        self.panel.appState.showSecondRoot(self.personID)
+        if self.panel.getClusterCenter(self.personID) == None:
+            self.panel.appState.showSecondRoot(self.personID)
     
     def mousePressEvent(self, event):
-        self.grabMouse()
-        self.ignoreForces = True
+        if self.panel.getClusterCenter(self.personID) == None:
+            self.grabMouse()
+            self.ignoreForces = True
+        else:
+            self.ungrabMouse()
     
     def mouseMoveEvent(self, event):
-        self.setPos(event.scenePos())
-        # As moving a node will cause disruption, allow me (and consequently my neighbors) to move faster
-        self.energy = node.MAX_ENERGY
+        if self.panel.getClusterCenter(self.personID) == None:
+            self.setPos(event.scenePos())
+            # As moving a node will cause disruption, allow me (and consequently my neighbors) to move faster
+            self.energy = node.MAX_ENERGY
+        else:
+            self.ungrabMouse()
     
     def mouseReleaseEvent(self, event):
         self.ungrabMouse()
-        self.ignoreForces = False
-        self.dx = 0
-        self.dy = 0
-        innerRadius = node.SIZE/2
-        x,y = event.pos().toTuple()
-        if x > -innerRadius and x < innerRadius:
-            if y < -innerRadius:
-                self.panel.expandOrCollapse(self,PedigreeComponent.UP)
-            elif y > innerRadius:
-                self.panel.expandOrCollapse(self,PedigreeComponent.DOWN)
-        elif (x < -innerRadius or x > innerRadius) and y > -innerRadius and y < innerRadius:
-            self.panel.expandOrCollapse(self,PedigreeComponent.HORIZONTAL)
+        if self.panel.getClusterCenter(self.personID) == None:
+            self.ignoreForces = False
+            self.dx = 0
+            self.dy = 0
+            innerRadius = node.SIZE/2
+            x,y = event.pos().toTuple()
+            if x > -innerRadius and x < innerRadius:
+                if y < -innerRadius:
+                    self.panel.expandOrCollapse(self,PedigreeComponent.UP)
+                elif y > innerRadius:
+                    self.panel.expandOrCollapse(self,PedigreeComponent.DOWN)
+            elif (x < -innerRadius or x > innerRadius) and y > -innerRadius and y < innerRadius:
+                self.panel.expandOrCollapse(self,PedigreeComponent.HORIZONTAL)
         
     def updateValues(self, neighbors):
         # Average every neighbor's energy with my own, then decay it a little
@@ -256,46 +277,56 @@ class node(fadeableGraphicsItem):
             return 0
     
     def applyForces(self, connectedEdges, generation, leftBound, rightBound):
-        if self.ignoreForces:
-            return
+        mx = self.x()
+        my = self.y()
         
         dx0 = self.dx
         dy0 = self.dy
         
-        # Vertical spring toward target
-        self.dy = (self.verticalTarget-self.y())*node.GENERATION_FORCE
-        
-        # Pull from edges
-        for e in connectedEdges:
-            self.dx += self.horizontalPullFrom(e)
-            self.dy += self.verticalPullFrom(e)
-        
-        # Push from the closest neighbors in the same generation
-        mx = self.x()
-        for p in generation:
-            ox = self.panel.nodes[p].x()
-            if ox < mx:
-                leftBound = max(ox,leftBound)
-            elif ox > mx:
-                rightBound = min(ox,rightBound)
-        if rightBound-mx <= node.SIZE or mx-leftBound <= node.SIZE:
-            # Shoot, we're overlapping with someone else... is our energy still high?
-            if self.energy > node.ENERGY_SWAP_THRESHOLD:
-                # Accelerate away
-                if rightBound-mx > mx-leftBound:
-                    distance = max(node.SIZE,mx-leftBound)**2
-                else:
-                    distance = -max(node.SIZE,rightBound-mx)**2
-            else:
-                # Otherwise, try swapping places and boosting our energy a little
-                if rightBound-mx > mx-leftBound:
-                    distance = -max(node.SIZE,rightBound-mx)**2
-                else:
-                    distance = max(node.SIZE,mx-leftBound)**2
-                self.energy += node.ENERGY_SWAP_THRESHOLD
+        # If we're supposed to be clustering, move to the cluster
+        clusterCenter = self.panel.getClusterCenter(self.personID)
+        if clusterCenter != None:
+            xGap = clusterCenter[0]-mx
+            yGap = clusterCenter[1]-my
+            self.dx += node.CLUSTER_FORCE*xGap
+            self.dy += node.CLUSTER_FORCE*yGap
         else:
-            distance = (leftBound+rightBound)*0.5-mx
-        self.dx += node.REPULSION_FORCE*distance
+            if self.ignoreForces:
+                return
+            
+            # Vertical spring toward target
+            self.dy = (self.verticalTarget-self.y())*node.GENERATION_FORCE
+            
+            # Pull from edges
+            for e in connectedEdges:
+                self.dx += self.horizontalPullFrom(e)
+                self.dy += self.verticalPullFrom(e)
+            
+            # Push from the closest neighbors in the same generation
+            for p in generation:
+                ox = self.panel.nodes[p].x()
+                if ox < mx:
+                    leftBound = max(ox,leftBound)
+                elif ox > mx:
+                    rightBound = min(ox,rightBound)
+            if rightBound-mx <= node.FAN_SIZE or mx-leftBound <= node.FAN_SIZE:
+                # Shoot, we're overlapping with someone else... is our energy still high?
+                if self.energy > node.ENERGY_SWAP_THRESHOLD:
+                    # Accelerate away
+                    if rightBound-mx > mx-leftBound:
+                        distance = max(node.FAN_SIZE,mx-leftBound)
+                    else:
+                        distance = -max(node.FAN_SIZE,rightBound-mx)
+                else:
+                    # Otherwise, try swapping places and boosting our energy a little
+                    if rightBound-mx > mx-leftBound:
+                        distance = -max(node.FAN_SIZE,rightBound-mx)
+                    else:
+                        distance = max(node.FAN_SIZE,mx-leftBound)
+                    self.energy += node.ENERGY_SWAP_THRESHOLD
+            else:
+                distance = (leftBound+rightBound)*0.5-mx
+            self.dx += node.REPULSION_FORCE*distance
         
         # If acceleration is zero, squash annoying tiny forces
         if self.dy - dy0 == 0 and abs(self.dy) < 0.2:
@@ -306,10 +337,97 @@ class node(fadeableGraphicsItem):
         self.dx *= self.energy
         self.dy *= self.energy
 
+class clusterTarget(fadeableGraphicsItem):
+    RADIUS = 75
+    MAX_OPACITY = 0.9
+    FONT = QFont("Monospace", pointSize=16, weight=QFont.Bold)
+    FONT.setStyleHint(QFont.TypeWriter)
+    
+    FIRST_ROOT = 0
+    INTERSECTION = 1
+    SECOND_ROOT = 2
+    NO_ROOT = 3
+    
+    def __init__(self, panel, x, y, clusterType):
+        QGraphicsItem.__init__(self)
+        self.panel = panel
+        self.clusterType = clusterType
+        self.setPos(x,y)
+        self.setZValue(3)
+    
+    def boundingRect(self):
+        return QRectF(-clusterTarget.RADIUS,-clusterTarget.RADIUS,clusterTarget.RADIUS,clusterTarget.RADIUS)
+    
+    def paint(self, painter, option, widget=None):
+        painter.setOpacity(self.opacity*clusterTarget.MAX_OPACITY)
+        brush = QBrush(self.panel.appState.BACKGROUND_COLOR)
+        pen = QPen(self.panel.appState.MISSING_COLOR, 2.0)
+        painter.setPen(pen)
+        path = QPainterPath()
+        path.addEllipse(-clusterTarget.RADIUS,-clusterTarget.RADIUS,clusterTarget.RADIUS*2,clusterTarget.RADIUS*2)
+        painter.fillPath(path,brush)
+        painter.drawPath(path)
+        
+        painter.setFont(clusterTarget.FONT)
+        painter.setOpacity(self.opacity)
+        if self.clusterType == clusterTarget.FIRST_ROOT:
+            painter.setPen(self.panel.appState.ROOT_COLOR)
+            self.drawString(painter, "B    ")
+            painter.setPen(self.panel.appState.MISSING_COLOR)
+            self.drawString(painter, "  -  ")
+            painter.setPen(self.panel.appState.SECOND_ROOT_COLOR)
+            self.drawString(painter, "    A")
+        elif self.clusterType == clusterTarget.INTERSECTION:
+            painter.setPen(self.panel.appState.SECOND_ROOT_COLOR)
+            self.drawString(painter, "A    ")
+            painter.setPen(self.panel.appState.MISSING_COLOR)
+            self.drawString(painter, "  " + unichr(8745) + "  ")
+            painter.setPen(self.panel.appState.ROOT_COLOR)
+            self.drawString(painter, "    B")
+        elif self.clusterType == clusterTarget.SECOND_ROOT:
+            painter.setPen(self.panel.appState.SECOND_ROOT_COLOR)
+            self.drawString(painter, "A    ")
+            painter.setPen(self.panel.appState.MISSING_COLOR)
+            self.drawString(painter, "  -  ")
+            painter.setPen(self.panel.appState.ROOT_COLOR)
+            self.drawString(painter, "    B")
+        else:
+            painter.setPen(self.panel.appState.MISSING_COLOR)
+            self.drawString(painter, "U - (  +  )")
+            painter.setPen(self.panel.appState.SECOND_ROOT_COLOR)
+            self.drawString(painter, "     A     ")
+            painter.setPen(self.panel.appState.ROOT_COLOR)
+            self.drawString(painter, "         B ")
+    
+    def drawString(self, painter, s):
+        # QPainter.drawStaticText isn't supported in pyside, so this is an ugly workaround
+        painter.drawText(-clusterTarget.RADIUS,-clusterTarget.RADIUS,clusterTarget.RADIUS*2,clusterTarget.RADIUS*2,
+                         Qt.AlignVCenter | Qt.AlignHCenter, s)
+    
+    def mouseDoubleClickEvent(self, event):
+        if self.panel.appState.secondRoot != None and event.button() == Qt.LeftButton:
+            if self.clusterType == clusterTarget.FIRST_ROOT:
+                self.panel.appState.showSecondRoot(None)
+            elif self.clusterType == clusterTarget.SECOND_ROOT:
+                self.panel.appState.setRoot(self.panel.appState.secondRoot)
+            elif self.clusterType == clusterTarget.INTERSECTION:
+                result = self.panel.centerCluster
+                self.panel.appState.showSecondRoot(None)
+                self.panel.appState.setRoot(None)
+                self.panel.appState.tweakVisibleSet(result)
+            else:
+                result = self.panel.noCluster
+                self.panel.appState.showSecondRoot(None)
+                self.panel.appState.setRoot(None)
+                self.panel.appState.tweakVisibleSet(result)
+        else:
+            return QGraphicsItem.mouseDoubleClickEvent(self,event)
+
 class edgeLayer(QGraphicsItem):
     def __init__(self, panel):
         QGraphicsItem.__init__(self)
         self.panel = panel
+        self.setZValue(1)
     
     def boundingRect(self):
         return QRectF(0.0,0.0,self.panel.right,self.panel.bottom)
@@ -324,7 +442,7 @@ class edgeLayer(QGraphicsItem):
                     continue
                 color = self.panel.appState.getPathColor(a,b)
                 if l == Pedigree.HUSBAND_TO_WIFE or l == Pedigree.WIFE_TO_HUSBAND:
-                    pen = QPen(color, 2, Qt.DotLine)
+                    pen = QPen(color, 1.5, Qt.DotLine)
                 else:
                     pen = QPen(color, 1.5)
                 painter.setPen(pen)
@@ -354,8 +472,37 @@ class PedigreeComponent(AppComponent):
         self.scene = QGraphicsScene()
         self.view.setScene(self.scene)
         # TODO: figure out these sizes differently...
-        self.bottom = 300
+        self.bottom = 400
         self.right = 1900
+        
+        self.clusterTargets = {}
+        self.leftCluster = set()
+        self.leftClusterX = self.right / 5
+        self.leftClusterY = self.bottom / 2
+        self.leftTarget = clusterTarget(self,self.leftClusterX,self.leftClusterY,clusterTarget.SECOND_ROOT)
+        self.scene.addItem(self.leftTarget)
+        self.leftTarget.forceDead()
+        
+        self.centerCluster = set()
+        self.centerClusterX = self.right / 2
+        self.centerClusterY = 3*self.bottom / 4
+        self.centerTarget = clusterTarget(self,self.centerClusterX,self.centerClusterY,clusterTarget.INTERSECTION)
+        self.scene.addItem(self.centerTarget)
+        self.centerTarget.forceDead()
+        
+        self.rightCluster = set()
+        self.rightClusterX = 4*self.right / 5
+        self.rightClusterY = self.bottom / 2
+        self.rightTarget = clusterTarget(self,self.rightClusterX,self.rightClusterY,clusterTarget.FIRST_ROOT)
+        self.scene.addItem(self.rightTarget)
+        self.rightTarget.forceDead()
+        
+        self.noCluster = set()
+        self.noClusterX = self.right / 2
+        self.noClusterY = self.bottom / 4
+        self.noTarget = clusterTarget(self,self.noClusterX,self.noClusterY,clusterTarget.NO_ROOT)
+        self.scene.addItem(self.noTarget)
+        self.noTarget.forceDead()
         
         self.edges = edgeLayer(self)
         self.scene.addItem(self.edges)
@@ -405,10 +552,15 @@ class PedigreeComponent(AppComponent):
         self.minGen = None
         self.maxGen = None
         
+        generationless = set()
+        
         for p,i in self.nodes.iteritems():
             if i.killed:
                 continue
-            gen = self.appState.ped.getAttribute(p,'generation',0)
+            gen = self.appState.ped.getAttribute(p,'generation',None)
+            if gen == None:
+                generationless.add(p)
+                continue
             
             if self.minGen == None:
                 self.minGen = gen
@@ -422,14 +574,17 @@ class PedigreeComponent(AppComponent):
             self.generations[gen].add(p)
         
         if self.minGen == None:
+            self.generations[0] = generationless
             return
         
-        offset = node.SIZE*0.5 # center-based drawing
-        increment = self.bottom / (max(self.maxGen-self.minGen+1,2))
+        self.generations[self.maxGen+1] = generationless
+        
+        offset = node.FAN_SIZE*0.5 # center-based drawing
+        increment = (self.bottom-node.FAN_SIZE) / (max(self.maxGen-self.minGen-1,2))
         
         for p,i in self.nodes.iteritems():
             if not i.dead:
-                slot = self.maxGen - self.appState.ped.getAttribute(p,'generation',self.maxGen) - 1
+                slot = self.maxGen - self.appState.ped.getAttribute(p,'generation',self.maxGen)
                 self.nodes[p].verticalTarget = self.bottom - slot*increment - offset
     
     def refreshHiddenCounts(self):
@@ -447,8 +602,95 @@ class PedigreeComponent(AppComponent):
                 else:
                     self.nodes[a].hiddenSpouses += 1
     
-    def notifyShowSecondRoot(self, previous, new):
-        pass
+    def getClusterCenter(self, person):
+        return self.clusterTargets.get(person,None)
+    
+    def notifySetRoot(self, previous, prevSet, new, newSet):
+        self.leftTarget.kill()
+        self.centerTarget.kill()
+        self.rightTarget.kill()
+        self.noTarget.kill()
+        
+        self.clusterTargets = {}
+        
+        for i in self.nodes.itervalues():
+            i.energy = node.MAX_ENERGY
+    
+    def notifyShowSecondRoot(self, previous, prevSet, new, newSet):
+        if new == None:
+            self.notifySetRoot(previous, prevSet, new, newSet)
+            return
+        fullSecondRootSet = set(self.appState.ped.iterDown(new))
+        self.leftCluster = newSet
+        self.centerCluster = self.appState.rootSet.intersection(fullSecondRootSet)
+        self.rightCluster = self.appState.rootSet.difference(fullSecondRootSet)
+        self.noCluster = set()
+        
+        leftCenterOfMassX = 0
+        leftCenterOfMassY = 0
+        
+        centerCenterOfMassX = 0
+        centerCenterOfMassY = 0
+        
+        rightCenterOfMassX = 0
+        rightCenterOfMassY = 0
+        
+        noCenterOfMassX = 0
+        noCenterOfMassY = 0
+        
+        for n,i in self.nodes.iteritems():
+            if n in self.leftCluster:
+                leftCenterOfMassX += i.x()
+                leftCenterOfMassY += i.y()
+            elif n in self.centerCluster:
+                centerCenterOfMassX += i.x()
+                centerCenterOfMassY += i.y()
+            elif n in self.rightCluster:
+                rightCenterOfMassX += i.x()
+                rightCenterOfMassY += i.y()
+            else:
+                noCenterOfMassX += i.x()
+                noCenterOfMassY += i.y()
+                self.noCluster.add(n)
+                
+        if len(self.leftCluster) > 0:
+            leftCenterOfMassX /= len(self.leftCluster)
+            leftCenterOfMassY /= len(self.leftCluster)
+        if len(self.centerCluster) > 0:
+            centerCenterOfMassX /= len(self.centerCluster)
+            centerCenterOfMassY /= len(self.centerCluster)
+        if len(self.rightCluster) > 0:
+            rightCenterOfMassX /= len(self.rightCluster)
+            rightCenterOfMassY /= len(self.rightCluster)
+        if len(self.noCluster) > 0:
+            noCenterOfMassX /= len(self.noCluster)
+            noCenterOfMassY /= len(self.noCluster)
+        
+        self.clusterTargets = {}
+        for n,i in self.nodes.iteritems():
+            i.energy = node.CLUSTER_ENERGY
+            if n in self.leftCluster:
+                targetX = node.CLUSTER_SCALE*(i.x()-leftCenterOfMassX)+self.leftClusterX
+                targetY = node.CLUSTER_SCALE*(i.y()-leftCenterOfMassY)+self.leftClusterY
+                self.clusterTargets[n] = (targetX,targetY)
+            elif n in self.centerCluster:
+                targetX = node.CLUSTER_SCALE*(i.x()-centerCenterOfMassX)+self.centerClusterX
+                targetY = node.CLUSTER_SCALE*(i.y()-centerCenterOfMassY)+self.centerClusterY
+                self.clusterTargets[n] = (targetX,targetY)
+            elif n in self.rightCluster:
+                targetX = node.CLUSTER_SCALE*(i.x()-rightCenterOfMassX)+self.rightClusterX
+                targetY = node.CLUSTER_SCALE*(i.y()-rightCenterOfMassY)+self.rightClusterY
+                self.clusterTargets[n] = (targetX,targetY)
+            else:
+                assert n in self.noCluster
+                targetX = node.CLUSTER_SCALE*(i.x()-noCenterOfMassX)+self.noClusterX
+                targetY = node.CLUSTER_SCALE*(i.y()-noCenterOfMassY)+self.noClusterY
+                self.clusterTargets[n] = (targetX,targetY)
+        
+        self.leftTarget.revive()
+        self.centerTarget.revive()
+        self.rightTarget.revive()
+        self.noTarget.revive()
     
     def expandOrCollapse(self, item, direction):
         if item.killed:
@@ -507,6 +749,11 @@ class PedigreeComponent(AppComponent):
     
     def updateValues(self):
         # Update opacity values, positions for this frame
+        self.leftTarget.updateValues()
+        self.centerTarget.updateValues()
+        self.rightTarget.updateValues()
+        self.noTarget.updateValues()
+        
         idsToDel = set()
         for p,i in self.nodes.iteritems():
             if i.dead:
@@ -525,200 +772,6 @@ class PedigreeComponent(AppComponent):
         
         # Finally, prep the next update by applying forces
         for p,i in self.nodes.iteritems():
-            i.applyForces(self.iterLivingNeighbors(p, strict=True),self.generations[self.appState.ped.getAttribute(p,'generation',self.maxGen)],0,self.right)
+            if not i.dead and not i.killed:
+                i.applyForces(self.iterLivingNeighbors(p, strict=True),self.generations[self.appState.ped.getAttribute(p,'generation',self.maxGen+1)],0,self.right)
         self.scene.update()
-    
-    '''
-    
-    def addPeople(self, people, direction = None):
-        # Create the node objects, update the number of generations
-        for p in people:
-            if self.g.node.has_key(p):
-                n = self.g.node[p]['item']
-                n.revive()
-            else:
-                startingX = None
-                startingY = None
-                if direction == PedigreeComponent.UP:
-                    startingY = 0
-                elif direction == PedigreeComponent.HORIZONTAL:
-                    startingX = 0
-                elif direction == PedigreeComponent.DOWN:
-                    startingY = self.bottom
-                
-                n = node(p,self,self.appState.ped.getAttribute(p,'sex','?'), startingX, startingY)
-                n.allParents,n.allSpouses,n.allChildren = self.appState.ped.countNuclear(p)
-                n.setZValue(1)
-                self.g.add_node(p, {'item':n})
-                self.scene.addItem(n)
-        # Add links to other people that are in the pedigree
-        for p in people:
-            for p2,t in self.appState.ped.iterNuclear(p):
-                if self.g.node.has_key(p2):
-                    if self.g.edge[p].has_key(p2):
-                        e = self.g.edge[p][p2]['item']
-                        e.revive()
-                    else:
-                        e = None
-                        if t == self.appState.ped.CHILD_TO_PARENT or t == self.appState.ped.PARENT_TO_CHILD:
-                            e = edge(self.g.node[p]['item'],self.g.node[p2]['item'],edge.GENETIC)
-                        else:
-                            e = edge(self.g.node[p]['item'],self.g.node[p2]['item'],edge.MARRIAGE)
-                        e.setZValue(0)
-                        self.g.add_edge(p, p2, {'item':e})
-                        self.scene.addItem(e)
-        self.refreshHiddenCounts()
-        self.refreshGenerations()
-        self.dumpCorpses() # painting happens in the same thread addPeople is in... we only want to release dead QGraphicsItems every once in a while
-    
-    def expandOrCollapse(self, item, direction):
-        if item.dead:
-            return
-        if direction == PedigreeComponent.UP:
-            if item.allParents == 0:
-                return
-            elif item.hiddenParents > 0:
-                self.addPeople(set(self.appState.ped.iterParents(item.personID)),PedigreeComponent.UP)
-            else:
-                self.discardPeople(set(self.appState.ped.iterParents(item.personID)))
-                self.cleanUp(item.personID)
-        elif direction == PedigreeComponent.HORIZONTAL:
-            if item.allSpouses == 0:
-                return
-            elif item.hiddenSpouses > 0:
-                self.addPeople(set(self.appState.ped.iterSpouses(item.personID)),PedigreeComponent.HORIZONTAL)
-            else:
-                self.discardPeople(set(self.appState.ped.iterSpouses(item.personID)))
-                self.cleanUp(item.personID)
-        elif direction == PedigreeComponent.DOWN:
-            if item.allChildren == 0:
-                return
-            elif item.hiddenChildren > 0:
-                self.addPeople(set(self.appState.ped.iterChildren(item.personID)),PedigreeComponent.DOWN)
-            else:
-                self.discardPeople(set(self.appState.ped.iterChildren(item.personID)))
-                self.cleanUp(item.personID)
-    
-    def cleanUp(self, person):
-        # throw away any connected components that aren't connected to person
-        nodesToRemove = set(self.g.node.iterkeys())
-        nodesToKeep = set()
-        
-        # Iterate down then up BFS style
-        toVisit = [person]
-        while len(toVisit) > 0:
-            p = toVisit.pop(0)
-            if not p in nodesToKeep:
-                nodesToKeep.add(p)
-                nodesToRemove.discard(p)
-                for p2 in self.g.edge[p].iterkeys():
-                    if not self.g.node[p2]['item'].dead and not self.g.node[p2]['item'].killed:
-                        toVisit.append(p2)
-        
-        self.discardPeople(nodesToRemove)
-    
-    def refreshHiddenCounts(self):
-        for person in self.g.node.iterkeys():
-            self.g.node[person]['item'].hiddenParents = 0
-            self.g.node[person]['item'].hiddenChildren = 0
-            self.g.node[person]['item'].hiddenSpouses = 0
-            for p,t in self.appState.ped.iterNuclear(person):
-                if self.g.node.has_key(p) and not self.g.node[p]['item'].killed:
-                    continue
-                elif t == self.appState.ped.PARENT_TO_CHILD:
-                    self.g.node[person]['item'].hiddenChildren += 1
-                elif t == self.appState.ped.CHILD_TO_PARENT:
-                    self.g.node[person]['item'].hiddenParents += 1
-                else:
-                    self.g.node[person]['item'].hiddenSpouses += 1
-    
-    def discardPeople(self, people):
-        # Start the time bombs
-        for p in people:
-            if not self.g.edge.has_key(p):
-                continue
-            for attrs in self.g.edge[p].itervalues():
-                attrs['item'].kill()
-            self.g.node[p]['item'].kill()
-    
-    def removeEveryone(self):
-        for source,target in self.g.edges():
-            self.g.edge[source][target]['item'].kill()
-        for attrs in self.g.node.itervalues():
-            attrs['item'].kill()
-    
-    def refreshGenerations(self):
-        self.generations = {}
-        self.minGen = None
-        self.maxGen = None
-        
-        for p in self.g.node.iterkeys():
-            gen = self.appState.ped.getAttribute(p,'generation',0)
-            
-            if self.minGen == None:
-                self.minGen = gen
-                self.maxGen = gen
-            else:
-                self.minGen = min(self.minGen,gen)
-                self.maxGen = max(self.maxGen,gen)
-            
-            if not self.generations.has_key(gen):
-                self.generations[gen] = set()
-            self.generations[gen].add(p)
-        
-        if self.minGen == None:
-            return
-        
-        bottom = self.bottom
-        offset = node.SIZE*0.5 # center-based drawing
-        increment = bottom / (max(self.maxGen-self.minGen+1,2))
-        
-        for p,attrs in self.g.node.iteritems():
-            n = attrs['item']
-            if not n.dead:
-                slot = self.maxGen - self.appState.ped.getAttribute(p,'generation',self.maxGen) - 1
-                self.g.node[p]['item'].verticalTarget = bottom - slot*increment - offset
-    
-    def updateValues(self):
-        # Update opacity values, positions for this frame
-        nodesToRemove = set()
-        edgesToRemove = set()
-        for source, t in self.g.edge.iteritems():
-            n = self.g.node[source]['item']
-            myNeighbors = set()
-            for target, attrs in t.iteritems():
-                e = attrs['item']
-                if not e.dead:
-                    e.updateValues()
-                    myNeighbors.add(self.g.node[target]['item'])
-                else:
-                    if not (target,source) in edgesToRemove:
-                        edgesToRemove.add((source,target))
-            if not n.dead:
-                n.updateValues(myNeighbors)
-            else:
-                nodesToRemove.add(source)
-        # Purge stuff we need to get rid of... start with edges
-        existingItems = set(self.scene.items())
-        for source,target in edgesToRemove:
-            e = self.g.edge[source][target]['item']
-            self.addCorpse(e)  # keep a reference to the item around until we know the main thread won't try to access it anymore (remember, this function is called from a timer)
-            self.g.remove_edge(source, target)
-            if e in existingItems:
-                self.scene.removeItem(e)
-        for p in nodesToRemove:
-            n = self.g.node[p]['item']
-            self.addCorpse(n)  # keep a reference to the item around until we know the main thread won't try to access it anymore (remember, this function is called from a timer)
-            self.g.remove_node(p)
-            if n in existingItems:
-                self.scene.removeItem(n)
-        self.refreshHiddenCounts()
-        self.refreshGenerations()
-        
-        # Finally, prep the next update by applying forces
-        for p,attrs in self.g.node.iteritems():
-            connectedEdges = set(attrs['item'] for attrs in self.g.edge[p].itervalues())
-            generationNodes = set(self.g.node[r]['item'] for r in self.generations[self.appState.ped.getAttribute(p,'generation',self.maxGen)])
-            attrs['item'].applyForces(connectedEdges,generationNodes,0,self.right)
-        self.scene.update()
-    '''

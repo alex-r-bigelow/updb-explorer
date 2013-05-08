@@ -12,11 +12,11 @@ class AppComponent(object):
         pass
     def notifyTweakVisibleSet(self, previous, new):
         pass
-    def notifySetRoot(self, previous, new):
+    def notifySetRoot(self, previous, prevSet, new, newSet):
         pass
-    def notifyShowSecondRoot(self, previous, new):
+    def notifyShowSecondRoot(self, previous, prevSet, new, newSet):
         pass
-    def notifyShowScatterplot(self):
+    def notifyChangeScatterplot(self, previousX, previousY, newX, newY):
         pass
     def notifyChangeFilter(self, attr):
         pass
@@ -30,10 +30,11 @@ class AppState(object):
     '''
     BACKGROUND_COLOR = Qt.white
     BORDER_COLOR = Qt.white
-    ACTIVE_COLOR = Qt.darkGray
-    ROOT_COLOR = Qt.darkGray
-    SECOND_ROOT_COLOR = Qt.gray
-    HIGHLIGHT_COLOR = Qt.lightGray
+    ACTIVE_COLOR = QColor.fromRgb(231,41,138)
+    ROOT_COLOR = QColor.fromRgb(27,158,119)
+    SECOND_ROOT_COLOR = QColor.fromRgb(217,95,2)
+    INTERSECTION_COLOR = QColor.fromRgb(117,112,179)
+    HIGHLIGHT_COLOR = QColor.fromRgb(230,171,2)
     MISSING_COLOR = Qt.black
     
     CATEGORICAL_COLORS = [QColor.fromHsvF(30.000/360.0,0.500,1.000),  # light orange
@@ -79,15 +80,23 @@ class AppState(object):
                         QColor.fromHsvF(250.000/360.0,0.450,0.900),
                         QColor.fromHsvF(250.000/360.0,0.300,1.000)]
     
+    @staticmethod
+    def blend(color1, color2, percentColor1=0.5):
+        pass
+    
     def __init__(self, ped):
         self.highlightedNode = None
         self.overlay = None
         self.highlightedPath = []
         self.visibleSet = set()
         self.root = None
+        self.rootSet = set()
         self.secondRoot = None
+        self.secondRootSet = set()
         self.filters = {}
         self.activePath = []
+        self.scatterX = None
+        self.scatterY = None
         
         self.binColors = True
         
@@ -103,13 +112,13 @@ class AppState(object):
         self.components.add(c)
         
     def adjustOrdinalValue(self, value):
-        # TODO: the histogram widget will tweak this...
+        # TODO: the histogram will be able to change the color map... we need to map values to colors accordingly
         return value
     
     def getOrdinalColor(self, value, alternate=1):
         if self.binColors:
-            lowerIndex = math.floor(4.0*value)
-            higherIndex = math.ceil(4.0*value)
+            lowerIndex = int(math.floor(4.0*value))
+            higherIndex = int(math.ceil(4.0*value))
             closerIndex = lowerIndex if value-math.floor(value) < math.ceil(value)-value else higherIndex
             if alternate == 2:
                 return AppState.ORDINAL_COLORS_2[closerIndex]
@@ -149,7 +158,7 @@ class AppState(object):
         if self.overlay == None:
             fill = AppState.MISSING_COLOR
         else:
-            fill = self.getColorForValue(self.ped.getAttribute(personID,self.overlay), self.overlay, alternate)
+            fill = self.getColorForValue(self.ped.getAttribute(personID,self.overlay,None), self.overlay, alternate)
         if personID == self.highlightedNode:
             stroke = AppState.HIGHLIGHT_COLOR
             showFan = True
@@ -195,23 +204,51 @@ class AppState(object):
         for c in self.components:
             c.notifyTweakVisibleSet(previous, s)
     def setRoot(self, r):
-        self.showSecondRoot(None)
         previous = self.root
+        prevSet = self.rootSet
         self.root = r
+        self.secondRoot = None
+        self.secondRootSet = set()
         if r != None:
-            self.tweakVisibleSet(set(self.ped.iterDown(r)))
+            self.rootSet = set(self.ped.iterDown(r))
+        else:
+            self.rootSet = set()
+        self.tweakVisibleSet(self.rootSet)
         for c in self.components:
-            c.notifySetRoot(previous, r)
+            c.notifySetRoot(previous, prevSet, self.root, self.rootSet)
     def showSecondRoot(self, r):
-        previous = self.secondRoot
-        self.secondRoot = r
-        if r != None:
-            self.tweakVisibleSet(set(self.ped.iterDown(r)).union(self.visibleSet))
+        if self.root == None:
+            self.setRoot(r)
+            return
+        elif self.root == r:
+            r = None
+        
+        if self.secondRoot == r:
+            self.setRoot(r)
+            previous = self.secondRoot
+            prevSet = self.secondRootSet
+            self.secondRoot = None
+            self.secondRootSet = set()
+        else:
+            previous = self.secondRoot
+            prevSet = self.secondRootSet
+            if len(prevSet) > 0:
+                self.tweakVisibleSet(self.visibleSet.difference(prevSet))
+            self.secondRoot = r
+            if r != None:
+                self.secondRootSet = set(self.ped.iterDown(r)).difference(self.visibleSet)
+            else:
+                self.secondRootSet = set()
+            self.tweakVisibleSet(self.secondRootSet.union(self.visibleSet))
         for c in self.components:
-            c.notifyShowSecondRoot(previous, r)
-    def showScatterplot(self):
+            c.notifyShowSecondRoot(previous, prevSet, self.secondRoot, self.secondRootSet)
+    def changeScatterplot(self, scatterX, scatterY):
+        lastX = scatterX
+        lastY = scatterY
+        self.scatterX = scatterX
+        self.scatterY = scatterY
         for c in self.components:
-            c.notifyShowScatterplot()
+            c.notifyChangeScatterplot(lastX,lastY,self.scatterX,self.scatterY)
     def notifySetActivePath(self, previous, p):
         previous = self.activePath
         self.activePath = p

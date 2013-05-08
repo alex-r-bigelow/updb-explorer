@@ -1,4 +1,4 @@
-from PySide.QtGui import QBrush, QTableWidget, QTableWidgetItem, QHeaderView
+from PySide.QtGui import QBrush, QTableWidget, QTableWidgetItem, QHeaderView, QMenu, QCursor
 from PySide.QtCore import Qt
 from app_state import AppComponent
 
@@ -29,10 +29,31 @@ class CustomHeader(QHeaderView):
         painter.restore()
         if logicalIndex == self.overlayIndex:
             painter.setOpacity(CustomHeader.OVERLAY_OPACITY)
-            painter.fillRect(rect,CustomHeader.OVERLAY)
+            painter.fillRect(rect,self.parent().appState.getColorForValue(0.0,self.parent().horizontalHeaderItem(logicalIndex).text()))
     
     def mouseReleaseEvent(self, event):
-        pass
+        if event.button() == Qt.RightButton:
+            table = self.parent()
+            column = table.horizontalHeaderItem(table.column(table.itemAt(event.pos()))).text()
+            m = QMenu()
+            m.addAction('Overlay/Filter')
+            c = m.addMenu('Compare to')
+            for h in table.appState.headers:
+                c.addAction(h)
+            m.addAction('Sort...')
+            choice = m.exec_(QCursor.pos())
+            
+            if choice != None:
+                choice = choice.text()
+                if choice == 'Overlay/Filter':
+                    table.appState.changeOverlay(column)
+                elif choice == 'Sort...':
+                    # TODO
+                    pass
+                else:
+                    table.appState.changeScatterplot(choice,column)
+        else:
+            QHeaderView.mouseReleaseEvent(self,event)
 
 class TableComponent(QTableWidget,AppComponent):
     def __init__(self, appState):
@@ -102,7 +123,7 @@ class TableComponent(QTableWidget,AppComponent):
         if new != None:
             self.colorRow(self.row(self.idLookup[new]),self.appState.HIGHLIGHT_COLOR)
     
-    def notifySetRoot(self, previous, new):
+    def notifySetRoot(self, previous, prevSet, new, newSet):
         if self.appState.highlightedNode != None and previous == self.appState.highlightedNode:
             self.colorRow(self.row(self.idLookup[previous]),self.appState.HIGHLIGHT_COLOR)
         elif self.appState.secondRoot != None and previous == self.appState.secondRoot:
@@ -114,7 +135,7 @@ class TableComponent(QTableWidget,AppComponent):
             self.colorRow(self.row(self.idLookup[new]),self.appState.ROOT_COLOR)
             self.scrollToItem(self.idLookup[new])
     
-    def notifyShowSecondRoot(self, previous, new):
+    def notifyShowSecondRoot(self, previous, prevSet, new, newSet):
         if self.appState.highlightedNode != None and previous == self.appState.highlightedNode:
             self.colorRow(self.row(self.idLookup[previous]),self.appState.HIGHLIGHT_COLOR)
         elif self.appState.root != None and previous == self.appState.root:
