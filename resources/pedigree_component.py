@@ -1,4 +1,4 @@
-import random, math
+import random, math, pygraphviz
 from PySide.QtGui import QGraphicsScene, QGraphicsItem, QPen, QBrush, QFont, QPainterPath
 from PySide.QtCore import Qt, QRectF, QTimer
 from app_state import AppComponent
@@ -542,47 +542,37 @@ class PedigreeComponent(AppComponent):
                 self.nodes[p] = n
                 self.scene.addItem(n)
         
+        self.initialLayout(list(peopleToAdd))
         self.refreshGenerations()
         self.refreshHiddenCounts()
     
     def refreshGenerations(self):
         self.generations = {}
-        self.minGen = None
-        self.maxGen = None
-        
-        generationless = set()
+        self.minGen = 0
+        self.maxGen = 0
         
         for p,i in self.nodes.iteritems():
             if i.killed:
                 continue
-            gen = self.appState.ped.getAttribute(p,'generation',None)
-            if gen == None:
-                generationless.add(p)
-                continue
+            gen = self.appState.ped.getAttribute(p,'generation')
+            gen1 = math.floor(gen)
+            gen2 = math.ceil(gen)
+            self.minGen = min(self.minGen,gen1,gen2)
+            self.maxGen = max(self.maxGen,gen1,gen2)
             
-            if self.minGen == None:
-                self.minGen = gen
-                self.maxGen = gen
-            else:
-                self.minGen = min(self.minGen,gen)
-                self.maxGen = max(self.maxGen,gen)
-            
-            if not self.generations.has_key(gen):
-                self.generations[gen] = set()
-            self.generations[gen].add(p)
-        
-        if self.minGen == None:
-            self.generations[0] = generationless
-            return
-        
-        self.generations[self.maxGen+1] = generationless
+            if not self.generations.has_key(gen1):
+                self.generations[gen1] = set()
+            self.generations[gen1].add(p)
+            if not self.generations.has_key(gen2):
+                self.generations[gen2] = set()
+            self.generations[gen2].add(p)
         
         offset = node.FAN_SIZE*0.5 # center-based drawing
         increment = (self.bottom-node.FAN_SIZE) / (max(self.maxGen-self.minGen-1,2))
         
         for p,i in self.nodes.iteritems():
             if not i.dead:
-                slot = self.maxGen - self.appState.ped.getAttribute(p,'generation',self.maxGen)
+                slot = self.maxGen - self.appState.ped.getAttribute(p,'generation')
                 self.nodes[p].verticalTarget = self.bottom - slot*increment - offset
     
     def refreshHiddenCounts(self):
@@ -745,6 +735,27 @@ class PedigreeComponent(AppComponent):
                     continue
                 yield b
     
+    def initialLayout(self, limitTo=None):
+        if limitTo == None:
+            limitTo = list(self.nodes.iterkeys())
+        pageHeight = self.right / self.bottom      # GraphViz measures page size in inches
+        a = pygraphviz.AGraph(strict=True,directed=True,size='%f,%f!'%(1.0,pageHeight),resolution=self.right,ratio='fill')
+        
+        for i,source in enumerate(limitTo):
+            a.add_node(source)
+            for target in limitTo[i+1:]:
+                l = self.appState.ped.getLink(source,target)
+                # Dot lays things out top to bottom, but we don't care about the direction of marriage connections
+                if l == self.appState.ped.HUSBAND_TO_WIFE:
+                    a.add_edge(source,target,dir='none')
+                else:
+                    a.add_edge(source,target)
+        a.layout(prog='dot')
+        for n in limitTo:
+            coords = a.get_node(n).attr['pos'].split(',')
+            self.nodes[n].setX(float(coords[0]))
+            self.nodes[n].setY(float(coords[1]))
+    
     def updateValues(self):
         # Update opacity values, positions for this frame
         self.leftTarget.updateValues()
@@ -771,5 +782,7 @@ class PedigreeComponent(AppComponent):
         # Finally, prep the next update by applying forces
         for p,i in self.nodes.iteritems():
             if not i.dead and not i.killed:
-                i.applyForces(self.iterLivingNeighbors(p, strict=True),self.generations[self.appState.ped.getAttribute(p,'generation',self.maxGen+1)],0,self.right)
+                gen = self.appState.ped.getAttribute(p,'generation')
+                generation = self.generations[math.floor(gen)].union(self.generations[math.ceil(gen)])
+                i.applyForces(self.iterLivingNeighbors(p, strict=True),generation,0,self.right)
         self.scene.update()

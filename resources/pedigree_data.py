@@ -108,15 +108,18 @@ class Pedigree(object):
     
     MAX_CATEGORIES = 12
     
-    def __init__(self, path, countAndCalculate=True, zeroMissing=False, tickFunction=None, num_ticks=None):
+    def __init__(self, path, countAndCalculate=True, zeroMissing=False, tickFunction=None, numTicks=None):
         self.g = networkx.DiGraph()
         self.rowOrder = []
         self.extraNodeAttributes = []
         
         self.attrDetails = {}
         
+        self.minGeneration = 0
+        self.maxGeneration = 0
+        
         self.tickFunction = tickFunction
-        self.num_ticks = num_ticks
+        self.numTicks = numTicks
         
         # TODO: parse other file formats based on their extension
         self._parseEgoPaMa(path, countAndCalculate, zeroMissing)
@@ -147,7 +150,7 @@ class Pedigree(object):
         with open(path,'rb') as infile:
             header = None
             for line in infile:
-                columns = line.strip().split()
+                columns = line.strip().split('\t')
                 if header == None:
                     header = columns
                     for k,v in Pedigree.REQUIRED_KEYS.iteritems():
@@ -241,7 +244,7 @@ class Pedigree(object):
                     self.rowOrder.append(p)
                     temp.add(p)
         if self.tickFunction != None:
-            self.tickFunction(increment=int(self.num_ticks/Pedigree.NUM_STEPS))
+            self.tickFunction(increment=int(self.numTicks/Pedigree.NUM_STEPS))
     
     def _countAndCalculate(self):
         # If I write my own dijkstra's, I can just toss this and use the real one
@@ -257,55 +260,43 @@ class Pedigree(object):
         # Flag roots and leaves, count descendants, collect affecteds, get starting point for generation counting
         if self.tickFunction != None:
             self.tickFunction(newMessage='Counting...',increment=0)
-        generationStart = self.rowOrder[0]
-        generationCount = 0
+        
+        allLeaves = set()
         for p in self.rowOrder:
             self.setAttribute(p, 'is_root', self.isRoot(p))
-            self.setAttribute(p, 'is_leaf', self.isLeaf(p))
-            
+            leaf = self.isLeaf(p)
+            self.setAttribute(p, 'is_leaf', leaf)
+            allLeaves.add(p)
             self.setAttribute(p, 'n_local_desc', 0)
             self.setAttribute(p, 'n_local_aff', set())
             for d in self.iterDown(p):
                 self.setAttribute(p, 'n_local_desc', self.getAttribute(p, 'n_local_desc') + 1)
                 if self.getAttribute(d, 'affected', None) == True:
                     self.getAttribute(p, 'n_local_aff').add(d)
-            if self.getAttribute(p, 'n_local_desc') > generationCount:
-                generationCount = self.getAttribute(p, 'n_local_desc')
-                generationStart = p
             # We need a consistent ordering of affecteds to calculate d
             self.setAttribute(p, 'n_local_aff', sorted(self.getAttribute(p, 'n_local_aff')))
         if self.tickFunction != None:
-            self.tickFunction(increment=int(self.num_ticks/Pedigree.NUM_STEPS))
+            self.tickFunction(increment=int(self.numTicks/Pedigree.NUM_STEPS))
         
         # Calculate generations
         if self.tickFunction != None:
             self.tickFunction(newMessage='Assigning generations...',increment=0)
-        generationVisitCount = len(self.rowOrder)
-        while True:
-            # Store the generation number, and keep track of how far up we go relative to us
-            error = 0
-            for p,g in self.iterGenerations(generationStart):
-                error = min(error,g)
-                self.setAttribute(p, 'generation', g)
-                generationVisitCount -= 1
-            
-            # Okay, now adjust for the error we saw
-            if error < 0:
-                for p,g in self.iterGenerations(generationStart):
-                    self.setAttribute(p, 'generation', self.getAttribute(p, 'generation') - error)
-            
-            # Finally, if there are any unconnected components to the section we just did, we need to
-            # keep working there... grab the first non-counted person we see
-            if generationVisitCount > 0:
-                for p in self.rowOrder:
-                    if self.getAttribute(p, 'generation', None) == None:
-                        generationStart = p
-                        # TODO: I probably ought to fly as high up as possible for better results
-                        break
-            else:
-                break
+        
+        for l in allLeaves:
+            for p,gen in self.iterGenerations(l):
+                total,count = self.getAttribute(p, 'generation', (0,0))
+                total += gen
+                count += 1
+                self.setAttribute(p, 'generation', (total,count))
+        
+        for p in self.rowOrder:
+            total,count = self.getAttribute(p, 'generation')
+            gen = total/float(count)
+            self.minGeneration = min(self.minGeneration,gen)
+            self.maxGeneration = max(self.maxGeneration,gen)
+            self.setAttribute(p, 'generation', gen)
         if self.tickFunction != None:
-            self.tickFunction(increment=int(self.num_ticks/Pedigree.NUM_STEPS))
+            self.tickFunction(increment=int(self.numTicks/Pedigree.NUM_STEPS))
         
         # Calculate d
         if self.tickFunction != None:
@@ -330,7 +321,7 @@ class Pedigree(object):
         for p in self.rowOrder:
             self.setAttribute(p, 'n_local_aff', len(self.getAttribute(p, 'n_local_aff')))
         if self.tickFunction != None:
-            self.tickFunction(increment=int(self.num_ticks/Pedigree.NUM_STEPS))
+            self.tickFunction(increment=int(self.numTicks/Pedigree.NUM_STEPS))
         
         # Now add spouse links - if I write my own dijkstra's for this method, I can toss this last section too
         if self.tickFunction != None:
@@ -342,7 +333,7 @@ class Pedigree(object):
                 self.g.add_edge(paID,maID,{'type':Pedigree.HUSBAND_TO_WIFE})
                 self.g.add_edge(maID,paID,{'type':Pedigree.WIFE_TO_HUSBAND})
         if self.tickFunction != None:
-            self.tickFunction(increment=int(self.num_ticks/Pedigree.NUM_STEPS))
+            self.tickFunction(increment=int(self.numTicks/Pedigree.NUM_STEPS))
     
     def dad(self, person):
         for parent in self.iterParents(person):
@@ -431,19 +422,26 @@ class Pedigree(object):
                 yield s
     
     def iterGenerations(self,person):
-        # Iterates down then up BFS style, yielding tuples with the person and the generation number relative to the starting point
+        # Iterates up BFS style, yielding tuples with the person and the generation number relative to the starting point
         toVisit = [(person,0)]
         visited = {}
-        error = 0
         while len(toVisit) > 0:
             p,g = toVisit.pop(0)
             if not visited.has_key(p):
                 visited[p] = g
-                for c in self.iterChildren(p):
-                    toVisit.append((c,g+1))
                 for c in self.iterParents(p):
                     toVisit.append((c,g-1))
                 yield (p,g)
+    
+    def getGeneration(self, g, epsilon=0.5):
+        results = set()
+        low = g-epsilon
+        high = g+epsilon
+        for p in self.rowOrder:
+            g0 = self.getAttribute(p, 'generation')
+            if g0 >= low and g0 <= high:
+                results.add(p)
+        return results
     
     def isRoot(self, person):
         for parent in self.iterParents(person):
@@ -669,6 +667,37 @@ class Pedigree(object):
                 outfile.write('%s]\n' % edgeList[:-2])
             outfile.write('}')
         outfile.close()
+    
+    def write_dot(self, path):
+        networkx.write_dot(self.g, path)
+    
+    def write_image(self, path, program='dot'):
+        import pygraphviz
+        a = pygraphviz.AGraph(strict=True,directed=True)
+        for source in self.g.edge.iterkeys():
+            if not source in a.nodes():
+                sex = self.getAttribute(source, 'sex', '?')
+                if sex == 'M':
+                    a.add_node(source,shape='square')
+                elif sex == 'F':
+                    a.add_node(source,shape='circle')
+                else:
+                    a.add_node(source,shape='point')
+            for target, attrs in self.g.edge[source].iteritems():
+                if not target in a.nodes():
+                    sex = self.getAttribute(target, 'sex', '?')
+                    if sex == 'M':
+                        a.add_node(target,shape='square')
+                    elif sex == 'F':
+                        a.add_node(target,shape='circle')
+                    else:
+                        a.add_node(target,shape='point')
+                        
+                if attrs['type'] == Pedigree.HUSBAND_TO_WIFE:
+                    a.add_edge(source,target,style='dashed',dir='none')
+                elif attrs['type'] == Pedigree.PARENT_TO_CHILD:
+                    a.add_edge(source,target,style='solid')
+        a.draw(path,prog=program)
 
 
 '''

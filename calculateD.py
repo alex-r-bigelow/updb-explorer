@@ -2,6 +2,10 @@
 import argparse, os
 from resources.pedigree_data import Pedigree, gexf_node_attribute_mapper
 
+def tick(newMessage=None,increment=1):
+    if newMessage != None:
+        print newMessage
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Calculates Nicki\'s d statistic given an ego-pa-ma file.')
     parser.add_argument('--in', type=str, dest="infile", required = True, help='Path to ego-pa-ma tab-separated file with headers.')
@@ -23,18 +27,23 @@ if __name__ == '__main__':
         Pedigree.RESERVED_KEYS[k] = getattr(args,k)
     
     print "Loading file..."
-    ped = Pedigree(args.infile, countAndCalculate=True, zeroMissing=args.zeroMissing.strip().upper().startswith('T'))
+    ped = Pedigree(args.infile, countAndCalculate=True, zeroMissing=args.zeroMissing.strip().upper().startswith('T'), tickFunction=tick, numTicks = 100)
     print "Writing file..."
-    extension = os.path.splitext(args.outfile)[1].lower()
-    if extension == '.gexf':
+    lowPath = args.outfile.lower()
+    if lowPath.endswith('.gexf'):
         edgeTypes = Pedigree.defaultEdgeTypes()
         nodeAttributeTypes = Pedigree.defaultNodeAttributeTypes()
         nodeAttributeTypes['is_root'] = gexf_node_attribute_mapper('is_root', attrType=gexf_node_attribute_mapper.BOOLEAN, defaultValue=False, validValues=[False,True])
         
         # Write the graph file
         ped.write_gexf(args.outfile, edgeTypes, nodeAttributeTypes)
-    elif extension == '.json':
+    elif lowPath.endswith('.json'):
         ped.write_json(args.outfile)
+    elif lowPath.endswith('.dot'):
+        ped.write_dot(args.outfile)
+    elif lowPath.endswith('.png'):
+        program = lowPath[:-4].split('.')[-1]
+        ped.write_image(args.outfile, program)
     else:
         ped.write_egopama(args.outfile)
     print "Done."

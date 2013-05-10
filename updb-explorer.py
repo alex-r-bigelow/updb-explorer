@@ -145,7 +145,7 @@ class loading(object):
                         progress.setLabelText(newMessage)
                     return True
                 
-                ped = Pedigree(self.window.inputField.text(), countAndCalculate=True, zeroMissing=self.window.zeroMissingBox.isChecked(), tickFunction=tick, num_ticks=NUM_TICKS)
+                ped = Pedigree(self.window.inputField.text(), countAndCalculate=True, zeroMissing=self.window.zeroMissingBox.isChecked(), tickFunction=tick, numTicks=NUM_TICKS)
                 
                 progress.setLabelText('Writing File...')
                 extension = os.path.splitext(self.window.outputField.text())[1].lower()
