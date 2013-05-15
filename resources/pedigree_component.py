@@ -542,8 +542,8 @@ class PedigreeComponent(AppComponent):
                 self.nodes[p] = n
                 self.scene.addItem(n)
         
-        self.initialLayout(list(peopleToAdd))
         self.refreshGenerations()
+        #self.initialLayout(list(peopleToAdd))
         self.refreshHiddenCounts()
     
     def refreshGenerations(self):
@@ -555,17 +555,12 @@ class PedigreeComponent(AppComponent):
             if i.killed:
                 continue
             gen = self.appState.ped.getAttribute(p,'generation')
-            gen1 = math.floor(gen)
-            gen2 = math.ceil(gen)
-            self.minGen = min(self.minGen,gen1,gen2)
-            self.maxGen = max(self.maxGen,gen1,gen2)
+            self.minGen = min(self.minGen,gen)
+            self.maxGen = max(self.maxGen,gen)
             
-            if not self.generations.has_key(gen1):
-                self.generations[gen1] = set()
-            self.generations[gen1].add(p)
-            if not self.generations.has_key(gen2):
-                self.generations[gen2] = set()
-            self.generations[gen2].add(p)
+            if not self.generations.has_key(gen):
+                self.generations[gen] = set()
+            self.generations[gen].add(p)
         
         offset = node.FAN_SIZE*0.5 # center-based drawing
         increment = (self.bottom-node.FAN_SIZE) / (max(self.maxGen-self.minGen-1,2))
@@ -738,23 +733,7 @@ class PedigreeComponent(AppComponent):
     def initialLayout(self, limitTo=None):
         if limitTo == None:
             limitTo = list(self.nodes.iterkeys())
-        pageHeight = self.right / self.bottom      # GraphViz measures page size in inches
-        a = pygraphviz.AGraph(strict=True,directed=True,size='%f,%f!'%(1.0,pageHeight),resolution=self.right,ratio='fill')
-        
-        for i,source in enumerate(limitTo):
-            a.add_node(source)
-            for target in limitTo[i+1:]:
-                l = self.appState.ped.getLink(source,target)
-                # Dot lays things out top to bottom, but we don't care about the direction of marriage connections
-                if l == self.appState.ped.HUSBAND_TO_WIFE:
-                    a.add_edge(source,target,dir='none')
-                else:
-                    a.add_edge(source,target)
-        a.layout(prog='dot')
-        for n in limitTo:
-            coords = a.get_node(n).attr['pos'].split(',')
-            self.nodes[n].setX(float(coords[0]))
-            self.nodes[n].setY(float(coords[1]))
+        # TODO
     
     def updateValues(self):
         # Update opacity values, positions for this frame

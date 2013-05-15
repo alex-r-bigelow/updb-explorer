@@ -117,6 +117,8 @@ class Pedigree(object):
         
         self.minGeneration = 0
         self.maxGeneration = 0
+        self.roots = set()
+        self.leaves = set()
         
         self.tickFunction = tickFunction
         self.numTicks = numTicks
@@ -199,6 +201,10 @@ class Pedigree(object):
                                 attribs[i] = None
                             else:
                                 attribs[i] = True if a == '1' else False
+                                if i == reserved_indices.get('is_root',None) and attribs[i] == True:
+                                    self.roots.add(personID)
+                                if i == reserved_indices.get('is_leaf',None) and attribs[i] == True:
+                                    self.leaves.add(personID)
                         elif a == '':
                                 attribs[i] = None
                         else:
@@ -247,7 +253,7 @@ class Pedigree(object):
             self.tickFunction(increment=int(self.numTicks/Pedigree.NUM_STEPS))
     
     def _countAndCalculate(self):
-        # If I write my own dijkstra's, I can just toss this and use the real one
+        # TODO: If I write my own dijkstra's, I can just toss this and use the real one
         def stupidIterSpouses(person):
             visited = set()
             for child in self.iterChildren(person):
@@ -261,12 +267,19 @@ class Pedigree(object):
         if self.tickFunction != None:
             self.tickFunction(newMessage='Counting...',increment=0)
         
-        allLeaves = set()
+        self.roots = set()
+        self.leaves = set()
         for p in self.rowOrder:
-            self.setAttribute(p, 'is_root', self.isRoot(p))
+            root = self.isRoot(p)
+            self.setAttribute(p, 'is_root', root)
+            if root:
+                self.roots.add(p)
+            
             leaf = self.isLeaf(p)
             self.setAttribute(p, 'is_leaf', leaf)
-            allLeaves.add(p)
+            if leaf:
+                self.leaves.add(p)
+            
             self.setAttribute(p, 'n_local_desc', 0)
             self.setAttribute(p, 'n_local_aff', set())
             for d in self.iterDown(p):
@@ -278,23 +291,29 @@ class Pedigree(object):
         if self.tickFunction != None:
             self.tickFunction(increment=int(self.numTicks/Pedigree.NUM_STEPS))
         
-        # Calculate generations
+        # Calculate generations - this is similar to rank in the dot layout algorithm
         if self.tickFunction != None:
             self.tickFunction(newMessage='Assigning generations...',increment=0)
         
-        for l in allLeaves:
-            for p,gen in self.iterGenerations(l):
-                total,count = self.getAttribute(p, 'generation', (0,0))
-                total += gen
-                count += 1
-                self.setAttribute(p, 'generation', (total,count))
-        
+        self.maxGeneration = 0
+        self.minGeneration = 0
+        genSetOnce = False
         for p in self.rowOrder:
-            total,count = self.getAttribute(p, 'generation')
-            gen = total/float(count)
-            self.minGeneration = min(self.minGeneration,gen)
-            self.maxGeneration = max(self.maxGeneration,gen)
-            self.setAttribute(p, 'generation', gen)
+            if not self.hasAttribute(p, 'generation'):
+                if not genSetOnce:
+                    p2 = p
+                    startingGen = 0
+                    genSetOnce = True
+                else:
+                    p2,startingGen = self._findMarriageWithDefinedGeneration(p)
+                    if p2 == None:
+                        p2 = p
+                        startingGen = 0
+                for p3,gen in self.iterGenerations(p2,startingGen):
+                    self.setAttribute(p3, 'generation', gen)
+                    self.maxGeneration = max(self.maxGeneration,gen)
+                    self.minGeneration = min(self.minGeneration,gen)
+        
         if self.tickFunction != None:
             self.tickFunction(increment=int(self.numTicks/Pedigree.NUM_STEPS))
         
@@ -421,9 +440,9 @@ class Pedigree(object):
             if s not in visited:
                 yield s
     
-    def iterGenerations(self,person):
-        # Iterates up BFS style, yielding tuples with the person and the generation number relative to the starting point
-        toVisit = [(person,0)]
+    def iterGenerations(self,person,startingGen=0):
+        # Iterates up and down BFS style, yielding tuples with the person and the generation number relative to the starting point
+        toVisit = [(person,startingGen)]
         visited = {}
         while len(toVisit) > 0:
             p,g = toVisit.pop(0)
@@ -431,7 +450,24 @@ class Pedigree(object):
                 visited[p] = g
                 for c in self.iterParents(p):
                     toVisit.append((c,g-1))
+                for c in self.iterChildren(p):
+                    toVisit.append((c,g+1))
                 yield (p,g)
+    
+    def _findMarriageWithDefinedGeneration(self,person):
+        # Iterates up and down BFS style, returning immediately once a marriage to a person with a defined generation is detected. The blood relative (without a defined generation) and the generation number is returned
+        toVisit = [person]
+        visited = set()
+        while len(toVisit) > 0:
+            p = toVisit.pop(0)
+            if not p in visited:
+                visited.add(p)
+                for s in self.iterSpouses(p):
+                    if self.hasAttribute(s, 'generation'):
+                        return (s,self.getAttribute(s, 'generation'))
+                toVisit.extend(self.iterParents(p))
+                toVisit.extend(self.iterChildren(p))
+        return (None,None)
     
     def getGeneration(self, g, epsilon=0.5):
         results = set()
@@ -443,13 +479,54 @@ class Pedigree(object):
                 results.add(p)
         return results
     
+    def iterEdges(self, edgeTypes={}):
+        if not edgeTypes.has_key(Pedigree.PARENT_TO_CHILD):
+            edgeTypes[Pedigree.PARENT_TO_CHILD] = True
+        if not edgeTypes.has_key(Pedigree.CHILD_TO_PARENT):
+            edgeTypes[Pedigree.CHILD_TO_PARENT] = True
+        if not edgeTypes.has_key(Pedigree.HUSBAND_TO_WIFE):
+            edgeTypes[Pedigree.HUSBAND_TO_WIFE] = True
+        if not edgeTypes.has_key(Pedigree.WIFE_TO_HUSBAND):
+            edgeTypes[Pedigree.WIFE_TO_HUSBAND] = True
+        
+        for source,t in self.g.edge.iteritems():
+            for target,attrs in t.iteritems():
+                if edgeTypes[attrs['type']] == True:
+                    yield (source,target)
+    
+    def extractSet(self, s, edgeTypes={}):
+        if not edgeTypes.has_key(Pedigree.PARENT_TO_CHILD):
+            edgeTypes[Pedigree.PARENT_TO_CHILD] = True
+        if not edgeTypes.has_key(Pedigree.CHILD_TO_PARENT):
+            edgeTypes[Pedigree.CHILD_TO_PARENT] = True
+        if not edgeTypes.has_key(Pedigree.HUSBAND_TO_WIFE):
+            edgeTypes[Pedigree.HUSBAND_TO_WIFE] = True
+        if not edgeTypes.has_key(Pedigree.WIFE_TO_HUSBAND):
+            edgeTypes[Pedigree.WIFE_TO_HUSBAND] = True
+        
+        result = networkx.DiGraph()
+        for p in s:
+            if not self.g.node.has_key(p):
+                raise Exception("Person doesn't exist: %s" % p)
+            result.add_node(p,self.g.node[p])
+            for p2,attrs in self.g.edge[p].iteritems():
+                if edgeTypes[Pedigree.PARENT_TO_CHILD] == True and attrs['type'] == Pedigree.PARENT_TO_CHILD:
+                    result.add_edge(p,p2,{'type':Pedigree.PARENT_TO_CHILD})
+                if edgeTypes[Pedigree.CHILD_TO_PARENT] == True and attrs['type'] == Pedigree.CHILD_TO_PARENT:
+                    result.add_edge(p,p2,{'type':Pedigree.CHILD_TO_PARENT})
+                if edgeTypes[Pedigree.HUSBAND_TO_WIFE] == True and attrs['type'] == Pedigree.HUSBAND_TO_WIFE:
+                    result.add_edge(p,p2,{'type':Pedigree.HUSBAND_TO_WIFE})
+                if edgeTypes[Pedigree.WIFE_TO_HUSBAND] == True and attrs['type'] == Pedigree.WIFE_TO_HUSBAND:
+                    result.add_edge(p,p2,{'type':Pedigree.WIFE_TO_HUSBAND})
+        return result
+    
     def isRoot(self, person):
-        for parent in self.iterParents(person):
+        for parent in self.iterParents(person):  # @UnusedVariable
             return False
         return True
     
     def isLeaf(self,person):
-        for child in self.iterChildren(person):
+        for child in self.iterChildren(person):  # @UnusedVariable
             return False
         return True
     
@@ -458,6 +535,11 @@ class Pedigree(object):
             return None
         else:
             return self.g.edge[s][t]['type']
+    
+    def hasAttribute(self, p, a):
+        a = Pedigree.REQUIRED_KEYS.get(a,a)
+        a = Pedigree.RESERVED_KEYS.get(a,a)
+        return self.g.node[p].has_key(a)
     
     def getAttribute(self, p, a, default=KEY_ERROR):
         a = Pedigree.REQUIRED_KEYS.get(a,a)
