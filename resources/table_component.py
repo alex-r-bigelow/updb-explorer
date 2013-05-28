@@ -34,24 +34,8 @@ class CustomHeader(QHeaderView):
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.RightButton:
             table = self.parent()
-            column = table.horizontalHeaderItem(table.column(table.itemAt(event.pos()))).text()
-            m = QMenu()
-            m.addAction('Overlay/Filter')
-            c = m.addMenu('Compare to')
-            for h in table.appState.headers:
-                c.addAction(h)
-            m.addAction('Sort...')
-            choice = m.exec_(QCursor.pos())
-            
-            if choice != None:
-                choice = choice.text()
-                if choice == 'Overlay/Filter':
-                    table.appState.changeOverlay(column)
-                elif choice == 'Sort...':
-                    # TODO
-                    pass
-                else:
-                    table.appState.changeScatterplot(choice,column)
+            attr = table.horizontalHeaderItem(table.column(table.itemAt(event.pos()))).text()
+            table.appState.showAttributeMenu(attr)
         else:
             QHeaderView.mouseReleaseEvent(self,event)
 
@@ -87,10 +71,22 @@ class TableComponent(QTableWidget,AppComponent):
     
     def setItem(self, row, column, item):
         QTableWidget.setItem(self,row,column,item)
-        item.setBackground(self.appState.BACKGROUND_COLOR)
+        item.setBackground(self.appState.MISSING_COLOR)
         self.numColumns = max(column,self.numColumns)
     
-    def colorRow(self, row, color):
+    def colorRow(self, person, color=None):
+        row = self.row(self.idLookup[person])
+        if color == None:
+            if person == self.appState.highlightedNode:
+                color = self.appState.HIGHLIGHT_COLOR
+            elif person in self.appState.abIntersection:
+                color = self.appState.INTERSECTION_COLOR
+            elif person in self.appState.aSet:
+                color = self.appState.A_COLOR
+            elif person in self.appState.bSet:
+                color = self.appState.B_COLOR
+            else:
+                color = self.appState.MISSING_COLOR
         for c in xrange(self.numColumns+1):
             self.item(row,c).setBackground(QBrush(color))
     
@@ -112,54 +108,47 @@ class TableComponent(QTableWidget,AppComponent):
         if nIndex != None:
             self.headerObj.updateSection(nIndex)
     
-    def notifyChangeHighlightedNode(self, previous, new):
-        if self.appState.secondRoot != None and previous == self.appState.secondRoot:
-            self.colorRow(self.row(self.idLookup[previous]),self.appState.SECOND_ROOT_COLOR)
-        elif self.appState.root != None and previous == self.appState.root:
-            self.colorRow(self.row(self.idLookup[previous]),self.appState.ROOT_COLOR)
-        elif previous != None:
-            self.colorRow(self.row(self.idLookup[previous]),self.appState.BACKGROUND_COLOR)
-        
+    def notifyHighlightAnIndividual(self, previous, new):
+        if previous != None:
+            self.colorRow(previous)
         if new != None:
-            self.colorRow(self.row(self.idLookup[new]),self.appState.HIGHLIGHT_COLOR)
+            self.colorRow(new)
     
-    def notifySetRoot(self, previous, prevSet, new, newSet):
-        if self.appState.highlightedNode != None and previous == self.appState.highlightedNode:
-            self.colorRow(self.row(self.idLookup[previous]),self.appState.HIGHLIGHT_COLOR)
-        elif self.appState.secondRoot != None and previous == self.appState.secondRoot:
-            self.colorRow(self.row(self.idLookup[previous]),self.appState.SECOND_ROOT_COLOR)
-        elif previous != None:
-            self.colorRow(self.row(self.idLookup[previous]),self.appState.BACKGROUND_COLOR)
+    def notifyChangePedigreeA(self, previousID, newID):
+        previousSet = self.appState.getHistoryPeople(previousID)
+        newSet = self.appState.getHistoryPeople(previousID)
         
-        if new != None:
-            self.colorRow(self.row(self.idLookup[new]),self.appState.ROOT_COLOR)
-            self.scrollToItem(self.idLookup[new])
+        for p in previousSet.symmetric_difference(newSet):  # only have to recolor stuff that changed
+            self.colorRow(p)
     
-    def notifyShowSecondRoot(self, previous, prevSet, new, newSet):
-        if self.appState.highlightedNode != None and previous == self.appState.highlightedNode:
-            self.colorRow(self.row(self.idLookup[previous]),self.appState.HIGHLIGHT_COLOR)
-        elif self.appState.root != None and previous == self.appState.root:
-            self.colorRow(self.row(self.idLookup[previous]),self.appState.ROOT_COLOR)
-        elif previous != None:
-            self.colorRow(self.row(self.idLookup[previous]),self.appState.BACKGROUND_COLOR)
+    def notifyChangePedigreeB(self, previousID, newID):
+        previousSet = self.appState.getHistoryPeople(previousID)
+        newSet = self.appState.getHistoryPeople(previousID)
         
-        if new != None:
-            self.colorRow(self.row(self.idLookup[new]),self.appState.SECOND_ROOT_COLOR)
-            self.scrollToItem(self.idLookup[new])
+        for p in previousSet.symmetric_difference(newSet):  # only have to recolor stuff that changed
+            self.colorRow(p)
+    
+    def mouseReleaseEvent(self, event):
+        m = event.button()
+        currentRow = self.rowAt(event.y())
+        currentID = self.item(currentRow,0).sortKey
         
+        if m == Qt.RightButton:
+            self.appState.showIndividualContextMenu(currentID)
+    
     def mouseDoubleClickEvent(self, event):
         m = event.button()
         currentRow = self.rowAt(event.y())
         currentID = self.item(currentRow,0).sortKey
         
         if m == Qt.LeftButton:
-            self.appState.showSecondRoot(currentID)
+            self.appState.showIndividualDetails(currentID)
     
     def mouseMoveEvent(self, event):
         currentRow = self.rowAt(event.y())
         currentID = self.item(currentRow,0).sortKey
         
-        self.appState.changeHighlightedNode(currentID)
+        self.appState.highlightAnIndividual(currentID)
     
     def leaveEvent(self, event):
-        self.appState.changeHighlightedNode(None)
+        self.appState.highlightAnIndividual(None)

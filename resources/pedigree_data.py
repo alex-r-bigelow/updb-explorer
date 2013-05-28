@@ -291,32 +291,6 @@ class Pedigree(object):
         if self.tickFunction != None:
             self.tickFunction(increment=int(self.numTicks/Pedigree.NUM_STEPS))
         
-        # Calculate generations - this is similar to rank in the dot layout algorithm
-        if self.tickFunction != None:
-            self.tickFunction(newMessage='Assigning generations...',increment=0)
-        
-        self.maxGeneration = 0
-        self.minGeneration = 0
-        genSetOnce = False
-        for p in self.rowOrder:
-            if not self.hasAttribute(p, 'generation'):
-                if not genSetOnce:
-                    p2 = p
-                    startingGen = 0
-                    genSetOnce = True
-                else:
-                    p2,startingGen = self._findMarriageWithDefinedGeneration(p)
-                    if p2 == None:
-                        p2 = p
-                        startingGen = 0
-                for p3,gen in self.iterGenerations(p2,startingGen):
-                    self.setAttribute(p3, 'generation', gen)
-                    self.maxGeneration = max(self.maxGeneration,gen)
-                    self.minGeneration = min(self.minGeneration,gen)
-        
-        if self.tickFunction != None:
-            self.tickFunction(increment=int(self.numTicks/Pedigree.NUM_STEPS))
-        
         # Calculate d
         if self.tickFunction != None:
             self.tickFunction(newMessage='Calculating d...',increment=0)
@@ -353,6 +327,32 @@ class Pedigree(object):
                 self.g.add_edge(maID,paID,{'type':Pedigree.WIFE_TO_HUSBAND})
         if self.tickFunction != None:
             self.tickFunction(increment=int(self.numTicks/Pedigree.NUM_STEPS))
+        
+        # Calculate generations - this is similar to rank in the dot layout algorithm
+        if self.tickFunction != None:
+            self.tickFunction(newMessage='Assigning generations...',increment=0)
+        
+        self.maxGeneration = 0
+        self.minGeneration = 0
+        genSetOnce = False
+        for p in self.rowOrder:
+            if not self.hasAttribute(p, 'generation'):
+                if not genSetOnce:
+                    p2 = p
+                    startingGen = 0
+                    genSetOnce = True
+                else:
+                    p2,startingGen = self._findMarriageWithDefinedGeneration(p)
+                    if p2 == None:
+                        p2 = p
+                        startingGen = 0
+                for p3,gen in self.iterGenerations(p2,startingGen):
+                    self.setAttribute(p3, 'generation', gen)
+                    self.maxGeneration = max(self.maxGeneration,gen)
+                    self.minGeneration = min(self.minGeneration,gen)
+        
+        if self.tickFunction != None:
+            self.tickFunction(increment=int(self.numTicks/Pedigree.NUM_STEPS))
     
     def dad(self, person):
         for parent in self.iterParents(person):
@@ -366,23 +366,48 @@ class Pedigree(object):
                 return parent
         return None
     
+    def iterFrom(self, person, directions=None, level=1, skipFirst=True):
+        # BFS only along specified directions
+        if directions == None:
+            directions = [Pedigree.CHILD_TO_PARENT,
+                          Pedigree.PARENT_TO_CHILD,
+                          Pedigree.HUSBAND_TO_WIFE,
+                          Pedigree.WIFE_TO_HUSBAND]
+        toVisit = [(person,0)]
+        visited = set()
+        while len(toVisit) > 0:
+            p,l = toVisit.pop(0)
+            if p not in visited:
+                visited.add(p)
+                e = self.g.edge[person]
+                for p2,attrs in e.iteritems():
+                    if not attrs['type'] in directions:
+                        continue
+                    if l < level:
+                        toVisit.append((p2,l+1))
+                if p != person or not skipFirst:
+                    yield p
+    
     def iterParents(self, person):
-        for parent,attrs in self.g.edge[person].iteritems():
-            if not attrs['type'] == Pedigree.CHILD_TO_PARENT:
-                continue
-            yield parent
+        return self.iterFrom(person,[Pedigree.CHILD_TO_PARENT],1,True)
     
     def iterChildren(self, person):
-        for child,attrs in self.g.edge[person].iteritems():
-            if not attrs['type'] == Pedigree.PARENT_TO_CHILD:
-                continue
-            yield child
+        return self.iterFrom(person,[Pedigree.PARENT_TO_CHILD],1,True)
         
     def iterSpouses(self, person):
-        for spouse,attrs in self.g.edge[person].iteritems():
-            if not attrs['type'] == Pedigree.HUSBAND_TO_WIFE or attrs['type'] == Pedigree.WIFE_TO_HUSBAND:
-                continue
-            yield spouse
+        return self.iterFrom(person,[Pedigree.HUSBAND_TO_WIFE,Pedigree.WIFE_TO_HUSBAND],1,True)
+    
+    def iterUp(self, person, level=float('inf')):
+        return self.iterFrom(person,[Pedigree.CHILD_TO_PARENT],level,False)
+    
+    def iterDown(self, person, level=float('inf')):
+        return self.iterFrom(person,[Pedigree.PARENT_TO_CHILD],level,False)
+    
+    def iterUpWithSpouses(self, person, level=float('inf')):
+        return self.iterFrom(person,[Pedigree.CHILD_TO_PARENT,Pedigree.HUSBAND_TO_WIFE,Pedigree.WIFE_TO_HUSBAND],level,False)
+    
+    def iterDownWithSpouses(self, person, level=float('inf')):
+        return self.iterFrom(person,[Pedigree.PARENT_TO_CHILD,Pedigree.HUSBAND_TO_WIFE,Pedigree.WIFE_TO_HUSBAND],level,False)
     
     def iterNuclear(self, person):
         # return the person and the relationship in a tuple
@@ -401,44 +426,6 @@ class Pedigree(object):
             else:
                 spouses += 1
         return (parents,spouses,children)
-    
-    def iterUp(self,person):
-        # BFS using a queue
-        toVisit = [person]
-        visited = set()
-        while len(toVisit) > 0:
-            p = toVisit.pop(0)
-            if not p in visited:
-                visited.add(p)
-                toVisit.extend(self.iterParents(p))
-                yield p
-    
-    def iterDown(self,person):
-        # BFS using a queue
-        toVisit = [person]
-        visited = set()
-        while len(toVisit) > 0:
-            p = toVisit.pop(0)
-            if not p in visited:
-                visited.add(p)
-                toVisit.extend(self.iterChildren(p))
-                yield p
-    
-    def iterDownWithSpouses(self, person):
-        # BFS using a queue
-        toVisit = [person]
-        visited = set()
-        spouses = set()
-        while len(toVisit) > 0:
-            p = toVisit.pop(0)
-            if not p in visited:
-                visited.add(p)
-                toVisit.extend(self.iterChildren(p))
-                spouses.update(self.iterSpouses(p))
-                yield p
-        for s in spouses:
-            if s not in visited:
-                yield s
     
     def iterGenerations(self,person,startingGen=0):
         # Iterates up and down BFS style, yielding tuples with the person and the generation number relative to the starting point
@@ -519,6 +506,18 @@ class Pedigree(object):
                 if edgeTypes[Pedigree.WIFE_TO_HUSBAND] == True and attrs['type'] == Pedigree.WIFE_TO_HUSBAND:
                     result.add_edge(p,p2,{'type':Pedigree.WIFE_TO_HUSBAND})
         return result
+    
+    def getConnectedComponent(self, person, startingSet):
+        toVisit = [person]
+        visited = set()
+        while len(toVisit) > 0:
+            p = toVisit.pop(0)
+            if not p in visited:
+                visited.add(p)
+                for p2 in self.g.edge[p].iterkeys():
+                    if p2 in startingSet:
+                        toVisit.append(p2)
+        return visited
     
     def isRoot(self, person):
         for parent in self.iterParents(person):  # @UnusedVariable

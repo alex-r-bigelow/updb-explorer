@@ -5,98 +5,99 @@ from app_state import AppComponent
 from pedigree_data import Pedigree
 
 class fadeableGraphicsItem(QGraphicsItem):
-    SPEED = 0.05
+    OPACITY_SPEED = 0.05
     HIDDEN_OPACITY = 0.25
+    SPATIAL_SPEED = 10
     
-    def __init__(self):
+    def __init__(self, x, y):
         QGraphicsItem.__init__(self)
-        self.dead = False
         self.hiding = False
         self.killed = False
+        self.dead = False
+        self.frozen = False
         
-        self.fadingIn = True
-        self.fadingOut = False
         self.opacity = 0.0
+        self.targetX = x
+        self.targetY = y
+        self.setPos(x,y)
     
     def updateValues(self):
-        if self.fadingIn:
-            self.opacity += fadeableGraphicsItem.SPEED
-            if self.opacity >= 1.0:
-                self.opacity = 1.0
-                self.fadingIn = False
-        elif self.fadingOut:
-            self.opacity -= fadeableGraphicsItem.SPEED
-            if self.hiding:
-                if self.opacity <= fadeableGraphicsItem.HIDDEN_OPACITY:
-                    self.opacity = fadeableGraphicsItem.HIDDEN_OPACITY
-                    self.fadingOut = False
-            elif self.killed:
-                if self.opacity <= 0.0:
-                    self.opacity = 0.0
-                    self.fadingOut = False
-                    self.dead = True
+        if self.dead:
+            self.opacity = 0.0
+        elif self.killed:
+            self.opacity = max(0.0,self.opacity-fadeableGraphicsItem.OPACITY_SPEED)
+            if self.opacity == 0.0:
+                self.dead = True
+        elif self.frozen:
+            return
+        elif self.hiding:
+            if self.opacity >= fadeableGraphicsItem.HIDDEN_OPACITY:
+                self.opacity = max(fadeableGraphicsItem.HIDDEN_OPACITY,self.opacity-fadeableGraphicsItem.OPACITY_SPEED)
+            else:
+                self.opacity = min(fadeableGraphicsItem.HIDDEN_OPACITY,self.opacity+fadeableGraphicsItem.OPACITY_SPEED)
+        else:
+            self.opacity = min(1.0,self.opacity+fadeableGraphicsItem.OPACITY_SPEED)
+        
+        x = self.x()
+        y = self.y()
+        if x >= self.targetX:
+            self.setX(max(self.targetX,x-fadeableGraphicsItem.SPATIAL_SPEED))
+        else:
+            self.setX(min(self.targetX,x+fadeableGraphicsItem.SPATIAL_SPEED))
+        if y >= self.targetY:
+            self.setY(max(self.targetY,y-fadeableGraphicsItem.SPATIAL_SPEED))
+        else:
+            self.setY(min(self.targetY,y+fadeableGraphicsItem.SPATIAL_SPEED))
     
     def hide(self):
         if self.killed:
             return
         self.hiding = True
-        self.fadingOut = True
     
     def show(self):
         self.hiding = False
-        self.fadingIn = True
     
     def kill(self):
-        self.hiding = False
         self.killed = True
-        self.fadingIn = False
-        self.fadingOut = True
     
     def forceDead(self):
         self.hiding = False
         self.killed = True
         self.dead = True
-        self.fadingIn = False
-        self.fadingOut = False
         self.opacity = 0.0
     
     def revive(self):
         self.dead = False
         self.killed = False
-        if not self.hiding:
-            self.fadingOut = False
-            self.fadingIn = True
-        else:
-            self.fadingOut = True
-            self.fadingIn = False
+    
+    def freeze(self):
+        self.frozen = True
+    
+    def thaw(self):
+        self.frozen = False
 
 class node(fadeableGraphicsItem):
-    MALE = 'M'
-    FEMALE = 'F'
-    
-    SIZE = 12
-    FAN_SIZE = 36
+    INNER_RADIUS = 6
+    OUTER_RADIUS = 18
+    PARTIAL_OFFSET = 3
     STROKE_WEIGHT = 3
+    FAN_OPACITY = 0.5
+    SCISSOR_WEIGHT = 3
     
-    HORIZONTAL_FORCE = 0.005
-    VERTICAL_FORCE = 0.03
-    GENERATION_FORCE = 0.015
-    CLUSTER_FORCE = 0.03
-    CLUSTER_SCALE = 0.35
-    REPULSION_FORCE = 0.01
-    MAX_ENERGY = 1.0
-    ENERGY_DECAY = 0.0001
-    ENERGY_SWAP_THRESHOLD = 0.1
-    CLUSTER_ENERGY = 0.5
+    UP = 0
+    DOWN = 1
+    HORIZONTAL = 2
     
-    def __init__(self, personID, panel, sex, startingX = None, startingY = None):
-        fadeableGraphicsItem.__init__(self)
+    def __init__(self, personID, panel, startingX = None, startingY = None):
+        if startingX == None:
+            startingX = random.randint(0,panel.right)
+        if startingY == None:
+            startingY = random.randint(0,panel.bottom)
+        fadeableGraphicsItem.__init__(self, startingX, startingY)
         self.setAcceptHoverEvents(True)
         
         self.personID = personID
         self.panel = panel
-        
-        self.sex = sex
         
         self.allParents = 0
         self.allChildren = 0
@@ -106,320 +107,206 @@ class node(fadeableGraphicsItem):
         self.hiddenChildren = 0
         self.hiddenSpouses = 0
         
-        self.verticalTarget = 0
-        self.energy = node.MAX_ENERGY
-        self.dx = 0.0
-        self.dy = 0.0
+        self.snipDirection = None
         
-        self.ignoreForces = False
-        
-        if startingX == None:
-            startingX = random.randint(0,self.panel.right)
-        if startingY == None:
-            startingY = random.randint(0,self.panel.bottom)
-        self.setPos(startingX,startingY)
         self.setZValue(2)
-        
-    def boundingRect(self):
-        radius = node.FAN_SIZE*0.5
-        return QRectF(-radius,-radius,node.FAN_SIZE,node.FAN_SIZE)
     
-    def paint(self, painter, option, widget=None):
-        fill,stroke,showFan = self.panel.appState.getColors(self.personID)
-        painter.setOpacity(self.opacity)
-        painter.setPen(QPen(stroke,node.STROKE_WEIGHT))
-        brush = QBrush(fill)
+    def boundingRect(self):
+        radius = node.OUTER_RADIUS*0.5
+        return QRectF(-radius,-radius,node.OUTER_RADIUS,node.OUTER_RADIUS)
+    
+    def drawScissors(self, painter):
+        painter.setOpacity(1.0)
+        painter.setPen(QPen(self.panel.appState.MISSING_COLOR,node.SCISSOR_WEIGHT))
         
-        outerRadius = node.FAN_SIZE*0.5
-        innerRadius = node.SIZE*0.5
+        if self.snipDirection == node.UP:
+            painter.drawLine(-node.INNER_RADIUS,-node.OUTER_RADIUS,node.INNER_RADIUS,-node.INNER_RADIUS)
+            painter.drawLine(node.INNER_RADIUS,-node.OUTER_RADIUS,-node.INNER_RADIUS,-node.INNER_RADIUS)
+        elif self.snipDirection == node.HORIZONTAL:
+            painter.drawLine(-node.OUTER_RADIUS,-node.INNER_RADIUS,-node.INNER_RADIUS,node.INNER_RADIUS)
+            painter.drawLine(-node.OUTER_RADIUS,node.INNER_RADIUS,-node.INNER_RADIUS,-node.INNER_RADIUS)
+            painter.drawLine(node.OUTER_RADIUS,-node.INNER_RADIUS,node.INNER_RADIUS,node.INNER_RADIUS)
+            painter.drawLine(node.OUTER_RADIUS,node.INNER_RADIUS,node.INNER_RADIUS,-node.INNER_RADIUS)
+        elif self.snipDirection == node.DOWN:
+            painter.drawLine(-node.INNER_RADIUS,node.OUTER_RADIUS,node.INNER_RADIUS,node.INNER_RADIUS)
+            painter.drawLine(node.INNER_RADIUS,node.OUTER_RADIUS,-node.INNER_RADIUS,node.INNER_RADIUS)
+    
+    def drawFan(self, painter):
+        painter.setOpacity(self.opacity*node.FAN_OPACITY)
+        fill = self.panel.appState.MISSING_COLOR
         
-        if showFan:
-            # Parent fan
+        # Parent fan
+        if self.hiddenParents > 0:
             path = QPainterPath()
             
-            if self.allParents == 0:
-                pass
-            elif self.hiddenParents > 0:
-                # point out
-                path.moveTo(-innerRadius,-innerRadius)
-                path.lineTo(0,-outerRadius)
-                path.lineTo(innerRadius,-innerRadius)
-                path.lineTo(-innerRadius,-innerRadius)
+            # point out
+            path.moveTo(-node.INNER_RADIUS,-node.INNER_RADIUS)
+            if self.hiddenParents < self.allParents:
+                path.lineTo(-node.PARTIAL_OFFSET,-node.OUTER_RADIUS)
+                path.lineTo(node.PARTIAL_OFFSET,-node.OUTER_RADIUS)
             else:
-                # point in
-                path.moveTo(-innerRadius,-outerRadius)
-                path.lineTo(0,-innerRadius)
-                path.lineTo(innerRadius,-outerRadius)
-                path.lineTo(-innerRadius,-outerRadius)
-            painter.fillPath(path,brush)
-            
-            # Marriage fans
+                path.lineTo(0,-node.OUTER_RADIUS)
+            path.lineTo(node.INNER_RADIUS,-node.INNER_RADIUS)
+            path.lineTo(-node.INNER_RADIUS,-node.INNER_RADIUS)
+            painter.fillPath(path,fill)
+        
+        # Marriage fans
+        if self.hiddenSpouses > 0:
             path1 = QPainterPath()
             path2 = QPainterPath()
             
-            if self.allSpouses == 0:
-                pass
-            elif self.hiddenSpouses > 0:
-                # point out
-                path1.moveTo(-innerRadius,-innerRadius)
-                path1.lineTo(-outerRadius,0)
-                path1.lineTo(-innerRadius,innerRadius)
-                path1.lineTo(-innerRadius,-innerRadius)
-                
-                path2.moveTo(innerRadius,-innerRadius)
-                path2.lineTo(outerRadius,0)
-                path2.lineTo(innerRadius,innerRadius)
-                path2.lineTo(innerRadius,-innerRadius)
+            # point out
+            path1.moveTo(-node.INNER_RADIUS,-node.INNER_RADIUS)
+            if self.hiddenSpouses < self.allSpouses:
+                path1.lineTo(-node.OUTER_RADIUS,-node.PARTIAL_OFFSET)
+                path1.lineTo(-node.OUTER_RADIUS,node.PARTIAL_OFFSET)
             else:
-                # point in
-                path1.moveTo(-outerRadius,-innerRadius)
-                path1.lineTo(-innerRadius,0)
-                path1.lineTo(-outerRadius,innerRadius)
-                path1.lineTo(-outerRadius,-innerRadius)
-                
-                path2.moveTo(outerRadius,-innerRadius)
-                path2.lineTo(innerRadius,0)
-                path2.lineTo(outerRadius,innerRadius)
-                path2.lineTo(outerRadius,-innerRadius)
-            painter.fillPath(path1,brush)
-            painter.fillPath(path2,brush)
+                path1.lineTo(-node.OUTER_RADIUS,0)
+            path1.lineTo(-node.INNER_RADIUS,node.INNER_RADIUS)
+            path1.lineTo(-node.INNER_RADIUS,-node.INNER_RADIUS)
             
-            # Child fan
+            path2.moveTo(node.INNER_RADIUS,-node.INNER_RADIUS)
+            if self.hiddenSpouses < self.allSpouses:
+                path1.lineTo(node.OUTER_RADIUS,-node.PARTIAL_OFFSET)
+                path1.lineTo(node.OUTER_RADIUS,node.PARTIAL_OFFSET)
+            else:
+                path1.lineTo(node.OUTER_RADIUS,0)
+            path2.lineTo(node.INNER_RADIUS,node.INNER_RADIUS)
+            path2.lineTo(node.INNER_RADIUS,-node.INNER_RADIUS)
+            
+            painter.fillPath(path1,fill)
+            painter.fillPath(path2,fill)
+        
+        # Child fan
+        if self.hiddenChildren > 0:
             path = QPainterPath()
             
-            if self.allChildren == 0:
-                pass
-            elif self.hiddenChildren > 0:
-                # point out
-                path.moveTo(-innerRadius,innerRadius)
-                path.lineTo(0,outerRadius)
-                path.lineTo(innerRadius,innerRadius)
-                path.lineTo(-innerRadius,innerRadius)
+            # point out
+            path.moveTo(-node.INNER_RADIUS,node.INNER_RADIUS)
+            if self.hiddenParents < self.allParents:
+                path.lineTo(-node.PARTIAL_OFFSET,node.OUTER_RADIUS)
+                path.lineTo(node.PARTIAL_OFFSET,node.OUTER_RADIUS)
             else:
-                # point in
-                path.moveTo(-innerRadius,outerRadius)
-                path.lineTo(0,innerRadius)
-                path.lineTo(innerRadius,outerRadius)
-                path.lineTo(-innerRadius,outerRadius)
-            painter.fillPath(path,brush)
+                path.lineTo(0,node.OUTER_RADIUS)
+            path.lineTo(node.INNER_RADIUS,node.INNER_RADIUS)
+            path.lineTo(-node.INNER_RADIUS,node.INNER_RADIUS)
+            painter.fillPath(path,fill)
+    
+    def drawSquare(self, painter, stroke=None, fill=None):
+        painter.setOpacity(self.opacity)
+        if fill != None:
+            painter.fillRect(-node.INNER_RADIUS,-node.INNER_RADIUS,node.INNER_RADIUS*2,node.INNER_RADIUS*2,fill)
+        if stroke != None:
+            painter.setPen(stroke)
+            painter.drawRect(-node.INNER_RADIUS,-node.INNER_RADIUS,node.INNER_RADIUS*2,node.INNER_RADIUS*2)
+    
+    def drawCircle(self, painter, stroke=None, fill=None):
+        painter.setOpacity(self.opacity)
+        path = QPainterPath()
+        path.addEllipse(-node.INNER_RADIUS,-node.INNER_RADIUS,node.INNER_RADIUS*2,node.INNER_RADIUS*2)
+        if fill != None:
+            painter.fillPath(path,fill)
+        if stroke != None:
+            painter.setPen(stroke)
+            painter.drawPath(path)
+    
+    def paint(self, painter, option, widget=None):
+        fill,stroke,showFan = self.panel.appState.getColors(self.personID)
+        stroke = QPen(stroke,node.STROKE_WEIGHT)
+        
+        if showFan:
+            self.drawFan(painter)
+        
+        if self.snipDirection != None:
+            self.drawScissors(painter)
         
         # Center shape
-        if self.sex == node.MALE:
-            painter.fillRect(-innerRadius,-innerRadius,node.SIZE,node.SIZE,brush)
-            painter.drawRect(-innerRadius,-innerRadius,node.SIZE,node.SIZE)
-        elif self.sex == node.FEMALE:
-            path = QPainterPath()
-            path.addEllipse(-innerRadius,-innerRadius,node.SIZE,node.SIZE)
-            painter.fillPath(path,brush)
-            painter.drawPath(path)
+        sex = self.panel.appState.ped.getAttribute(self.personID,'sex','?')
+        if sex == 'M':
+            self.drawSquare(painter, stroke, fill)
+        elif sex == 'F':
+            self.drawCircle(painter, stroke, fill)
         else:
             raise Exception('Unknown sex.')
     
     def hoverEnterEvent(self, event):
-        if self.panel.getClusterCenter(self.personID) == None:
-            self.panel.appState.changeHighlightedNode(self.personID)
+        self.panel.appState.highlightAnIndividual(self.personID)
     
     def hoverLeaveEvent(self, event):
-        if self.panel.getClusterCenter(self.personID) == None:
-            self.panel.appState.changeHighlightedNode(None)
+        self.panel.appState.highlightAnIndividual(None)
     
     def mouseDoubleClickEvent(self, event):
-        if self.panel.getClusterCenter(self.personID) == None:
-            self.panel.appState.showSecondRoot(self.personID)
+        self.panel.appState.showIndividualDetails(self.personID)
     
     def mousePressEvent(self, event):
-        if self.panel.getClusterCenter(self.personID) == None:
-            self.grabMouse()
-            self.ignoreForces = True
-        else:
-            self.ungrabMouse()
+        self.grabMouse()
+        self.freeze()
+        x,y = event.pos().toTuple()
+        if x > -node.OUTER_RADIUS \
+        and x < node.OUTER_RADIUS \
+        and y > -node.OUTER_RADIUS \
+        and y < node.OUTER_RADIUS:
+            if x > -node.INNER_RADIUS and x < node.INNER_RADIUS:
+                if y < -node.INNER_RADIUS:
+                    self.snipDirection = node.UP
+                elif y > node.INNER_RADIUS:
+                    self.snipDirection = node.DOWN
+            elif (x < -node.INNER_RADIUS or x > node.INNER_RADIUS) \
+            and y > -node.INNER_RADIUS \
+            and y < node.INNER_RADIUS:
+                self.snipDirection = node.HORIZONTAL
     
     def mouseMoveEvent(self, event):
-        if self.panel.getClusterCenter(self.personID) == None:
+        if self.snipDirection == None:
             self.setPos(event.scenePos())
-            # As moving a node will cause disruption, allow me (and consequently my neighbors) to move faster
-            self.energy = node.MAX_ENERGY
-        else:
-            self.ungrabMouse()
     
     def mouseReleaseEvent(self, event):
         self.ungrabMouse()
-        if self.panel.getClusterCenter(self.personID) == None:
-            self.ignoreForces = False
-            self.dx = 0
-            self.dy = 0
-            innerRadius = node.SIZE/2
+        self.thaw()
+        if self.snipDirection != None:
+            # Only perform a snip action if we started and ended in the same area
             x,y = event.pos().toTuple()
-            if x > -innerRadius and x < innerRadius:
-                if y < -innerRadius:
-                    self.panel.expandOrCollapse(self,PedigreeComponent.UP)
-                elif y > innerRadius:
-                    self.panel.expandOrCollapse(self,PedigreeComponent.DOWN)
-            elif (x < -innerRadius or x > innerRadius) and y > -innerRadius and y < innerRadius:
-                self.panel.expandOrCollapse(self,PedigreeComponent.HORIZONTAL)
-        
-    def updateValues(self, neighbors):
-        # Average every neighbor's energy with my own, then decay it a little
-        fadeableGraphicsItem.updateValues(self)
-        for n in neighbors:
-            self.energy += n.energy
-        self.energy = max(0,(self.energy/(len(neighbors)+1)-node.ENERGY_DECAY))
-        self.moveBy(self.dx,self.dy)
-    
-    def horizontalPullFrom(self, n):
-        return node.HORIZONTAL_FORCE*(self.panel.nodes[n].x() - self.panel.nodes[self.personID].x())
-    
-    def verticalPullFrom(self, n):
-        l = self.panel.appState.ped.getLink(self.personID,n)
-        if l == Pedigree.HUSBAND_TO_WIFE or l == Pedigree.WIFE_TO_HUSBAND:
-            return node.VERTICAL_FORCE*(self.panel.nodes[n].y() - self.panel.nodes[self.personID].y())
+            if x > -node.OUTER_RADIUS \
+            and x < node.OUTER_RADIUS \
+            and y > -node.OUTER_RADIUS \
+            and y < node.OUTER_RADIUS:
+                if x > -node.INNER_RADIUS and x < node.INNER_RADIUS:
+                    if y < -node.INNER_RADIUS and self.snipDirection == node.UP:
+                        self.panel.appState.snip(self.personID,[self.panel.ped.CHILD_TO_PARENT])
+                    elif y > node.INNER_RADIUS and self.snipDirection == node.DOWN:
+                        self.panel.appState.snip(self.personID,[self.panel.ped.PARENT_TO_CHILD])
+                elif (x < -node.INNER_RADIUS or x > node.INNER_RADIUS) \
+                and y > -node.INNER_RADIUS \
+                and y < node.INNER_RADIUS \
+                and self.snipDirection == node.HORIZONTAL:
+                    self.panel.appState.snip(self.personID,[self.panel.ped.HUSBAND_TO_WIFE,
+                                                            self.panel.ped.WIFE_TO_HUSBAND])
+            self.snipDirection = None
         else:
-            return 0
-    
-    def applyForces(self, connectedEdges, generation, leftBound, rightBound):
-        mx = self.x()
-        my = self.y()
-        
-        dx0 = self.dx
-        dy0 = self.dy
-        
-        # If we're supposed to be clustering, move to the cluster
-        clusterCenter = self.panel.getClusterCenter(self.personID)
-        if clusterCenter != None:
-            xGap = clusterCenter[0]-mx
-            yGap = clusterCenter[1]-my
-            self.dx += node.CLUSTER_FORCE*xGap
-            self.dy += node.CLUSTER_FORCE*yGap
-        else:
-            if self.ignoreForces:
-                return
-            
-            # Vertical spring toward target
-            self.dy = (self.verticalTarget-self.y())*node.GENERATION_FORCE
-            
-            # Pull from edges
-            for e in connectedEdges:
-                self.dx += self.horizontalPullFrom(e)
-                self.dy += self.verticalPullFrom(e)
-            
-            # Push from the closest neighbors in the same generation
-            for p in generation:
-                ox = self.panel.nodes[p].x()
-                if ox < mx:
-                    leftBound = max(ox,leftBound)
-                elif ox > mx:
-                    rightBound = min(ox,rightBound)
-            if rightBound-mx <= node.FAN_SIZE or mx-leftBound <= node.FAN_SIZE:
-                # Shoot, we're overlapping with someone else... is our energy still high?
-                if self.energy > node.ENERGY_SWAP_THRESHOLD:
-                    # Accelerate away
-                    if rightBound-mx > mx-leftBound:
-                        distance = max(node.FAN_SIZE,mx-leftBound)
-                    else:
-                        distance = -max(node.FAN_SIZE,rightBound-mx)
-                else:
-                    # Otherwise, try swapping places and boosting our energy a little
-                    if rightBound-mx > mx-leftBound:
-                        distance = -max(node.FAN_SIZE,rightBound-mx)
-                    else:
-                        distance = max(node.FAN_SIZE,mx-leftBound)
-                    self.energy += node.ENERGY_SWAP_THRESHOLD
-            else:
-                distance = (leftBound+rightBound)*0.5-mx
-            self.dx += node.REPULSION_FORCE*distance
-        
-        # If acceleration is zero, squash annoying tiny forces
-        if self.dy - dy0 == 0 and abs(self.dy) < 0.2:
-            self.dy = 0
-        if self.dx - dx0 == 0 and abs(self.dx) < 0.2:
-            self.dx = 0
-        
-        self.dx *= self.energy
-        self.dy *= self.energy
+            pass
+            # TODO: reorder the nodes
 
-class clusterTarget(fadeableGraphicsItem):
-    RADIUS = 75
-    MAX_OPACITY = 0.9
-    FONT = QFont("Monospace", pointSize=16, weight=QFont.Bold)
-    FONT.setStyleHint(QFont.TypeWriter)
+class ghostNode(object):
+    def __init__(self, parent, child):
+        self.parent = parent
+        self.child = child
+
+class pedigreeSlice(fadeableGraphicsItem):
+    OPACITY_PROPORTION = 0.5
+    THICKNESS = 5
     
-    FIRST_ROOT = 0
-    INTERSECTION = 1
-    SECOND_ROOT = 2
-    NO_ROOT = 3
-    
-    def __init__(self, panel, x, y, clusterType):
-        QGraphicsItem.__init__(self)
-        self.panel = panel
-        self.clusterType = clusterType
-        self.setPos(x,y)
+    def __init__(self, x, y, height, brush):
+        fadeableGraphicsItem.__init__(self, x, y)
+        self.height = height
+        self.brush = brush
         self.setZValue(3)
     
     def boundingRect(self):
-        return QRectF(-clusterTarget.RADIUS,-clusterTarget.RADIUS,clusterTarget.RADIUS*2,clusterTarget.RADIUS*2)
+        return QRectF(-pedigreeSlice.THICKNESS*0.5,-self.height*0.5,pedigreeSlice.THICKNESS,self.height)
     
     def paint(self, painter, option, widget=None):
-        painter.setOpacity(self.opacity*clusterTarget.MAX_OPACITY)
-        brush = QBrush(self.panel.appState.BACKGROUND_COLOR)
-        pen = QPen(self.panel.appState.MISSING_COLOR, 2.0)
-        painter.setPen(pen)
-        path = QPainterPath()
-        path.addEllipse(-clusterTarget.RADIUS,-clusterTarget.RADIUS,clusterTarget.RADIUS*2,clusterTarget.RADIUS*2)
-        painter.fillPath(path,brush)
-        painter.drawPath(path)
-        
-        painter.setFont(clusterTarget.FONT)
-        painter.setOpacity(self.opacity)
-        if self.clusterType == clusterTarget.FIRST_ROOT:
-            painter.setPen(self.panel.appState.ROOT_COLOR)
-            self.drawString(painter, "B    ")
-            painter.setPen(self.panel.appState.MISSING_COLOR)
-            self.drawString(painter, "  -  ")
-            painter.setPen(self.panel.appState.SECOND_ROOT_COLOR)
-            self.drawString(painter, "    A")
-        elif self.clusterType == clusterTarget.INTERSECTION:
-            painter.setPen(self.panel.appState.SECOND_ROOT_COLOR)
-            self.drawString(painter, "A    ")
-            painter.setPen(self.panel.appState.MISSING_COLOR)
-            self.drawString(painter, "  " + unichr(8745) + "  ")
-            painter.setPen(self.panel.appState.ROOT_COLOR)
-            self.drawString(painter, "    B")
-        elif self.clusterType == clusterTarget.SECOND_ROOT:
-            painter.setPen(self.panel.appState.SECOND_ROOT_COLOR)
-            self.drawString(painter, "A    ")
-            painter.setPen(self.panel.appState.MISSING_COLOR)
-            self.drawString(painter, "  -  ")
-            painter.setPen(self.panel.appState.ROOT_COLOR)
-            self.drawString(painter, "    B")
-        else:
-            painter.setPen(self.panel.appState.MISSING_COLOR)
-            self.drawString(painter, "U - (  +  )")
-            painter.setPen(self.panel.appState.SECOND_ROOT_COLOR)
-            self.drawString(painter, "     A     ")
-            painter.setPen(self.panel.appState.ROOT_COLOR)
-            self.drawString(painter, "         B ")
-    
-    def drawString(self, painter, s):
-        # QPainter.drawStaticText isn't supported in pyside, so this is an ugly workaround
-        painter.drawText(-clusterTarget.RADIUS,-clusterTarget.RADIUS,clusterTarget.RADIUS*2,clusterTarget.RADIUS*2,
-                         Qt.AlignVCenter | Qt.AlignHCenter, s)
-        
-    def mouseDoubleClickEvent(self, event):
-        if not self.killed and event.button() == Qt.LeftButton:
-            if self.clusterType == clusterTarget.FIRST_ROOT:
-                self.panel.appState.showSecondRoot(None)
-            elif self.clusterType == clusterTarget.SECOND_ROOT:
-                self.panel.appState.setRoot(self.panel.appState.secondRoot)
-            elif self.clusterType == clusterTarget.INTERSECTION:
-                result = self.panel.centerCluster
-                self.panel.appState.showSecondRoot(None)
-                self.panel.appState.setRoot(None)
-                self.panel.appState.tweakVisibleSet(result)
-            else:
-                result = self.panel.noCluster
-                self.panel.appState.showSecondRoot(None)
-                self.panel.appState.setRoot(None)
-                self.panel.appState.tweakVisibleSet(result)
+        painter.setOpacity(self.opacity*pedigreeSlice.OPACITY_PROPORTION)
+        painter.fillRect(-pedigreeSlice.THICKNESS*0.5,-self.height*0.5,pedigreeSlice.THICKNESS,self.height,self.brush)
 
 class edgeLayer(QGraphicsItem):
     def __init__(self, panel):
@@ -464,8 +351,7 @@ class PedigreeComponent(AppComponent):
         self.corpses = set()
         
         self.generations = {}
-        self.minGen = None
-        self.maxGen = None
+        self.generationOrder = []
         
         self.scene = QGraphicsScene()
         self.view.setScene(self.scene)
@@ -473,37 +359,14 @@ class PedigreeComponent(AppComponent):
         self.bottom = 400
         self.right = 1900
         
-        self.clusterTargets = {}
-        self.leftCluster = set()
-        self.leftClusterX = self.right / 5
-        self.leftClusterY = self.bottom / 2
-        self.leftTarget = clusterTarget(self,self.leftClusterX,self.leftClusterY,clusterTarget.SECOND_ROOT)
-        self.scene.addItem(self.leftTarget)
-        self.leftTarget.forceDead()
-        
-        self.centerCluster = set()
-        self.centerClusterX = self.right / 2
-        self.centerClusterY = 3*self.bottom / 4
-        self.centerTarget = clusterTarget(self,self.centerClusterX,self.centerClusterY,clusterTarget.INTERSECTION)
-        self.scene.addItem(self.centerTarget)
-        self.centerTarget.forceDead()
-        
-        self.rightCluster = set()
-        self.rightClusterX = 4*self.right / 5
-        self.rightClusterY = self.bottom / 2
-        self.rightTarget = clusterTarget(self,self.rightClusterX,self.rightClusterY,clusterTarget.FIRST_ROOT)
-        self.scene.addItem(self.rightTarget)
-        self.rightTarget.forceDead()
-        
-        self.noCluster = set()
-        self.noClusterX = self.right / 2
-        self.noClusterY = self.bottom / 4
-        self.noTarget = clusterTarget(self,self.noClusterX,self.noClusterY,clusterTarget.NO_ROOT)
-        self.scene.addItem(self.noTarget)
-        self.noTarget.forceDead()
-        
         self.edges = edgeLayer(self)
         self.scene.addItem(self.edges)
+        self.aSlice = pedigreeSlice(self.right,self.bottom/2,self.bottom,self.appState.MISSING_COLOR)
+        self.scene.addItem(self.aSlice)
+        self.bSlice = pedigreeSlice(self.right,self.bottom/2,self.bottom,self.appState.MISSING_COLOR)
+        self.scene.addItem(self.bSlice)
+        
+        # TODO: add some buttons for union, intersection, and closing A and B
         
         self.timer = QTimer(self.view)
         self.timer.timeout.connect(self.updateValues)
@@ -514,10 +377,19 @@ class PedigreeComponent(AppComponent):
     
     def dumpCorpses(self):
         self.corpses = set()
+        
+    def notifyChangePedigreeA(self, previousID, newID):
+        self.addOrRemovePeople(isA=True)
     
-    def notifyTweakVisibleSet(self, previous, new):
-        peopleToKill = previous.difference(new)
-        peopleToAdd = new.difference(previous)
+    def notifyChangePedigreeB(self, previousID, newID):
+        self.addOrRemovePeople(isA=False)
+    
+    def addOrRemovePeople(self, isA):
+        previousSet = set(self.nodes.keys())
+        newSet = self.appState.aSet.union(self.appState.bSet)
+        
+        peopleToKill = previousSet.difference(newSet)
+        peopleToAdd = newSet.difference(previousSet)
         
         for p in peopleToKill:
             if self.nodes.has_key(p):
@@ -527,48 +399,224 @@ class PedigreeComponent(AppComponent):
             if self.nodes.has_key(p):
                 self.nodes[p].revive()
             else:
-                startingX = None
-                startingY = None
-                # TODO: fly in directions
-                '''if direction == PedigreeComponent.UP:
-                    startingY = 0
-                elif direction == PedigreeComponent.HORIZONTAL:
+                if isA:
                     startingX = 0
-                elif direction == PedigreeComponent.DOWN:
-                    startingY = self.bottom'''
+                else:
+                    startingX = self.right
+                startingY = 0
                 
-                n = node(p,self,self.appState.ped.getAttribute(p,'sex','?'), startingX, startingY)
+                n = node(p,self, startingX, startingY)
                 n.allParents,n.allSpouses,n.allChildren = self.appState.ped.countNuclear(p)
                 self.nodes[p] = n
                 self.scene.addItem(n)
         
         self.refreshGenerations()
-        #self.initialLayout(list(peopleToAdd))
         self.refreshHiddenCounts()
     
     def refreshGenerations(self):
-        self.generations = {}
-        self.minGen = 0
-        self.maxGen = 0
+        # Keep everyone in the same order that hasn't been killed or moved; don't worry about the ghost nodes
+        oldPeople = set()
+        movedFromA = set()
+        movedFromIntersection = set()
+        movedFromB = set()
+        newGenerations = {}
+        for g in self.generationOrder:
+            a,i,b = self.generations[g]
+            self.newGenerations[g] = ([],[],[])
+            for p in a:
+                if not isinstance(p,ghostNode) and not self.nodes[p].killed:
+                    if p in self.appState.aSet:
+                        oldPeople.add(p)
+                        newGenerations[g][0].append(p)
+                    else:
+                        movedFromA.add(p)
+            for p in i:
+                if not isinstance(p,ghostNode) and not self.nodes[p].killed:
+                    if p in self.appState.abIntersection:
+                        oldPeople.add(p)
+                        newGenerations[g][1].append(p)
+                    else:
+                        movedFromIntersection.add(p)
+            for p in b:
+                if not isinstance(p,ghostNode) and not self.nodes[p].killed:
+                    if p in self.appState.bSet:
+                        oldPeople.add(p)
+                        newGenerations[g][2].append(p)
+                    else:
+                        movedFromB.add(p)
+        self.generations = newGenerations
         
-        for p,i in self.nodes.iteritems():
-            if i.killed:
+        # Now add everyone that is new, as well as people that were moved to new areas
+        for p in self.nodes.iterkeys():
+            if p in oldPeople:
                 continue
-            gen = self.appState.ped.getAttribute(p,'generation')
-            self.minGen = min(self.minGen,gen)
-            self.maxGen = max(self.maxGen,gen)
+            g = self.appState.ped.getAttribute(p,'generation')
+            if not self.generations.has_key(g):
+                self.generations[g] = ([],[],[])
+            if p in self.appState.aSet:
+                if p in movedFromIntersection or p in movedFromB:
+                    self.generations[g][0].append(p)    # moved people should start on the right
+                else:
+                    self.generations[g][0].insert(0,p)  # new people should start on the left
+            elif p in self.appState.abIntersection:
+                if p in movedFromA:
+                    self.generations[g][1].insert(0,p)  # moved people from A should start on the left
+                elif p in movedFromB:
+                    self.generations[g][1].append(0)    # moved people from B should start on the right
+                else:
+                    self.generations[g][1].insert(len(self.generations[g][1])/2,p)  # don't think this is actually possible, but new people should start in the middle
+            elif p in self.appState.bSet:
+                if p in movedFromIntersection or p in movedFromA:
+                    self.generations[g][2].insert(0,p)  # moved people shoudl start on the left
+                else:
+                    self.generations[g][2].append(p)    # new people should start on the right
+        
+        # Now we need to know which generations actually have people in them
+        minGen = None
+        maxGen = None
+        numGenerations = 0
+        emptyGenerations = set()
+        for g in self.generationOrder:
+            if len(self.generations[g][0]) > 0 or len(self.generations[g][1]) > 0 or len(self.generations[g][2]) > 0:
+                numGenerations += 1
+                if minGen == None:
+                    minGen = g
+                else:
+                    minGen = min(minGen,g)
+                if maxGen == None:
+                    maxGen = g
+                else:
+                    maxGen = max(maxGen,g)
+            else:
+                emptyGenerations.add(g)
+        
+        if numGenerations == 0:
+            # at this point we know for sure there is no data currently displayed
+            return
+        
+        # Now add ghost nodes where they're needed
+        for y,g in enumerate(self.generationOrder):
+            if g < minGen or g > maxGen or g in emptyGenerations:
+                continue
+            for x,p in enumerate(self.generations[g]):
+                # Insert ghosts at roughly the same horizontal position (x) where they're needed
+                for p2,linkType in self.appState.ped.iterNuclear(p):
+                    generationsThatNeedGhosts = []
+                    if linkType == self.appState.ped.CHILD_TO_PARENT:
+                        genIterator = reversed(self.generationOrder[:y])
+                    elif linkType == self.appState.ped.PARENT_TO_CHILD:
+                        genIterator = self.generationOrder[y:]
+                    else:
+                        # For spouses, if they're in the same generation, we already know we don't need any ghosts.
+                        if p2 in self.generations[g]:
+                            continue
+                        # First try down. Later we'll try up
+                        genIterator = self.generationOrder[y:]
+                    
+                    foundTarget = False
+                    for g2 in genIterator:
+                        if p2 in self.generations[g2]:
+                            foundTarget = True
+                            break
+                        else:
+                            if g2 >= minGen and g2 <= maxGen and not g in emptyGenerations:
+                                generationsThatNeedGhosts.append(g2)
+                    if foundTarget:
+                        lastGhost = p
+                        for g2 in generationsThatNeedGhosts:
+                            if linkType == self.appState.ped.CHILD_TO_PARENT:
+                                ghost = ghostNode(g2,lastGhost)
+                            else:   # parent to child and our first spouse iteration go down
+                                ghost = ghostNode(lastGhost,g2)
+                            self.generations[g2].insert(x,ghost)
+                            lastGhost = ghost
+                        if linkType == self.appState.ped.CHILD_TO_PARENT:
+                            lastGhost.parent = p2
+                        else:
+                            lastGhost.child = p2
+                    elif linkType == self.appState.ped.HUSBAND_TO_WIFE or linkType == self.appState.ped.WIFE_TO_HUSBAND:
+                        # we have to try again in the other direction for a spouse
+                        generationsThatNeedGhosts = []
+                        foundTarget = False
+                        for g2 in reversed(self.generationOrder[:y]):
+                            if p2 in self.generations[g2]:
+                                foundTarget = True
+                                break
+                            else:
+                                if g2 >= minGen and g2 <= maxGen and not g in emptyGenerations:
+                                    generationsThatNeedGhosts.append(g2)
+                        if foundTarget:
+                            lastGhost = p
+                            for g2 in generationsThatNeedGhosts:
+                                ghost = ghostNode(g2,lastGhost)
+                                self.generations[g2].insert(x,ghost)
+                                lastGhost = ghost
+                            lastGhost.parent = p2
+        
+        # Now update screen targets; sfirst we need to know the widest generation in each section
+        aWidth = 0
+        iWidth = 0
+        bWidth = 0
+        numNonEmpty = 0
+        for g,(a,i,b) in self.generations.iteritems():
+            aWidth = max(len(a),aWidth)
+            iWidth = max(len(i),iWidth)
+            bWidth = max(len(b),bWidth)
+        if aWidth > 0:
+            numNonEmpty += 1
+        if iWidth > 0:
+            numNonEmpty += 1
+        if bWidth > 0:
+            numNonEmpty += 1
+        
+        xincrement = (self.right-node.OUTER_RADIUS*2)/max(aWidth+iWidth+bWidth+1,2)   # the extra width is for the slices
+        yincrement = (self.bottom-node.OUTER_RADIUS*2)/max(numGenerations-1,2)    # this prevents division by zero, and a two-generation pedigree spread across the top and bottom looks funny
+        
+        # set the slice target positions
+        self.aSlice.targetX = aWidth*xincrement
+        self.bSlice.targetX = (aWidth+1+iWidth)*xincrement
+        if numNonEmpty > 1:
+            self.aSlice.show()
+            self.bSlice.show()
+        else:
+            self.aSlice.hide()
+            self.bSlice.show()
+        
+        # set the node target positions
+        y = node.OUTER_RADIUS   # start with an offset; nodes are drawn from the center
+        for g in self.generationOrder:
+            if g < minGen or g > maxGen or g in emptyGenerations:
+                continue
+            a,i,b = self.generations[g]
             
-            if not self.generations.has_key(gen):
-                self.generations[gen] = set()
-            self.generations[gen].add(p)
-        
-        offset = node.FAN_SIZE*0.5 # center-based drawing
-        increment = (self.bottom-node.FAN_SIZE) / (max(self.maxGen-self.minGen-1,2))
-        
-        for p,i in self.nodes.iteritems():
-            if not i.dead:
-                slot = self.maxGen - self.appState.ped.getAttribute(p,'generation')
-                self.nodes[p].verticalTarget = self.bottom - slot*increment - offset
+            # align a to the left
+            x = node.OUTER_RADIUS
+            for p in a:
+                if not isinstance(p,ghostNode):
+                    i = self.nodes[p]
+                    i.targetX = x
+                    i.targetY = y
+                x += xincrement
+            
+            # TODO: align i to the center
+            x = node.OUTER_RADIUS + (aWidth+1)*xincrement
+            for p in i:
+                if not isinstance(p,ghostNode):
+                    i = self.nodes[p]
+                    i.targetX = x
+                    i.targetY = y
+                x += xincrement
+            
+            # TODO: align b to the right
+            x = node.OUTER_RADIUS + (aWidth+1+iWidth+1)*xincrement
+            for p in b:
+                if not isinstance(p,ghostNode):
+                    i = self.nodes[p]
+                    i.targetX = x
+                    i.targetY = y
+                x += xincrement
+            
+            y += yincrement
     
     def refreshHiddenCounts(self):
         for a in self.nodes.iterkeys():
@@ -585,142 +633,6 @@ class PedigreeComponent(AppComponent):
                 else:
                     self.nodes[a].hiddenSpouses += 1
     
-    def getClusterCenter(self, person):
-        return self.clusterTargets.get(person,None)
-    
-    def notifySetRoot(self, previous, prevSet, new, newSet):
-        self.leftTarget.kill()
-        self.centerTarget.kill()
-        self.rightTarget.kill()
-        self.noTarget.kill()
-        
-        self.clusterTargets = {}
-        
-        for i in self.nodes.itervalues():
-            i.energy = node.MAX_ENERGY
-    
-    def notifyShowSecondRoot(self, previous, prevSet, new, newSet):
-        if new == None:
-            self.notifySetRoot(previous, prevSet, new, newSet)
-            return
-        fullSecondRootSet = set(self.appState.ped.iterDown(new))
-        self.leftCluster = newSet
-        self.centerCluster = self.appState.rootSet.intersection(fullSecondRootSet)
-        self.rightCluster = self.appState.rootSet.difference(fullSecondRootSet)
-        self.noCluster = set()
-        
-        leftCenterOfMassX = 0
-        leftCenterOfMassY = 0
-        
-        centerCenterOfMassX = 0
-        centerCenterOfMassY = 0
-        
-        rightCenterOfMassX = 0
-        rightCenterOfMassY = 0
-        
-        noCenterOfMassX = 0
-        noCenterOfMassY = 0
-        
-        for n,i in self.nodes.iteritems():
-            if n in self.leftCluster:
-                leftCenterOfMassX += i.x()
-                leftCenterOfMassY += i.y()
-            elif n in self.centerCluster:
-                centerCenterOfMassX += i.x()
-                centerCenterOfMassY += i.y()
-            elif n in self.rightCluster:
-                rightCenterOfMassX += i.x()
-                rightCenterOfMassY += i.y()
-            else:
-                noCenterOfMassX += i.x()
-                noCenterOfMassY += i.y()
-                self.noCluster.add(n)
-                
-        if len(self.leftCluster) > 0:
-            leftCenterOfMassX /= len(self.leftCluster)
-            leftCenterOfMassY /= len(self.leftCluster)
-        if len(self.centerCluster) > 0:
-            centerCenterOfMassX /= len(self.centerCluster)
-            centerCenterOfMassY /= len(self.centerCluster)
-        if len(self.rightCluster) > 0:
-            rightCenterOfMassX /= len(self.rightCluster)
-            rightCenterOfMassY /= len(self.rightCluster)
-        if len(self.noCluster) > 0:
-            noCenterOfMassX /= len(self.noCluster)
-            noCenterOfMassY /= len(self.noCluster)
-        
-        self.clusterTargets = {}
-        for n,i in self.nodes.iteritems():
-            i.energy = node.CLUSTER_ENERGY
-            if n in self.leftCluster:
-                targetX = node.CLUSTER_SCALE*(i.x()-leftCenterOfMassX)+self.leftClusterX
-                targetY = node.CLUSTER_SCALE*(i.y()-leftCenterOfMassY)+self.leftClusterY
-                self.clusterTargets[n] = (targetX,targetY)
-            elif n in self.centerCluster:
-                targetX = node.CLUSTER_SCALE*(i.x()-centerCenterOfMassX)+self.centerClusterX
-                targetY = node.CLUSTER_SCALE*(i.y()-centerCenterOfMassY)+self.centerClusterY
-                self.clusterTargets[n] = (targetX,targetY)
-            elif n in self.rightCluster:
-                targetX = node.CLUSTER_SCALE*(i.x()-rightCenterOfMassX)+self.rightClusterX
-                targetY = node.CLUSTER_SCALE*(i.y()-rightCenterOfMassY)+self.rightClusterY
-                self.clusterTargets[n] = (targetX,targetY)
-            else:
-                assert n in self.noCluster
-                targetX = node.CLUSTER_SCALE*(i.x()-noCenterOfMassX)+self.noClusterX
-                targetY = node.CLUSTER_SCALE*(i.y()-noCenterOfMassY)+self.noClusterY
-                self.clusterTargets[n] = (targetX,targetY)
-        
-        self.leftTarget.revive()
-        self.centerTarget.revive()
-        self.rightTarget.revive()
-        self.noTarget.revive()
-    
-    def expandOrCollapse(self, item, direction):
-        if item.killed:
-            return
-        existingSet = self.appState.visibleSet
-        if direction == PedigreeComponent.UP:
-            if item.allParents == 0:
-                return
-            elif item.hiddenParents > 0:
-                self.appState.tweakVisibleSet(existingSet.union(self.appState.ped.iterParents(item.personID)))
-            else:
-                # throw away the branch in two steps
-                self.appState.tweakVisibleSet(existingSet.difference(self.appState.ped.iterParents(item.personID)))
-                self.cleanUp(item.personID)
-        elif direction == PedigreeComponent.HORIZONTAL:
-            if item.allSpouses == 0:
-                return
-            elif item.hiddenSpouses > 0:
-                self.appState.tweakVisibleSet(existingSet.union(self.appState.ped.iterSpouses(item.personID)))
-            else:
-                # throw away the branch in two steps
-                self.appState.tweakVisibleSet(existingSet.difference(self.appState.ped.iterSpouses(item.personID)))
-                self.cleanUp(item.personID)
-        elif direction == PedigreeComponent.DOWN:
-            if item.allChildren == 0:
-                return
-            elif item.hiddenChildren > 0:
-                self.appState.tweakVisibleSet(existingSet.union(self.appState.ped.iterChildren(item.personID)))
-            else:
-                # throw away the branch in two steps
-                self.appState.tweakVisibleSet(existingSet.difference(self.appState.ped.iterChildren(item.personID)))
-                self.cleanUp(item.personID)
-    
-    def cleanUp(self, person):
-        # throw away any connected components that aren't connected to person
-        nodesToKeep = set()
-        
-        # Iterate down then up BFS style
-        toVisit = [person]
-        while len(toVisit) > 0:
-            a = toVisit.pop(0)
-            if not a in nodesToKeep:
-                nodesToKeep.add(a)
-                toVisit.extend(self.iterLivingNeighbors(a, strict=True))
-        
-        self.appState.tweakVisibleSet(nodesToKeep)
-    
     def iterLivingNeighbors(self, person, strict=False):
         if not self.nodes.has_key(person) or self.nodes[person].dead or (strict and self.nodes[person].killed):
             raise StopIteration
@@ -730,17 +642,9 @@ class PedigreeComponent(AppComponent):
                     continue
                 yield b
     
-    def initialLayout(self, limitTo=None):
-        if limitTo == None:
-            limitTo = list(self.nodes.iterkeys())
-        # TODO
-    
     def updateValues(self):
-        # Update opacity values, positions for this frame
-        self.leftTarget.updateValues()
-        self.centerTarget.updateValues()
-        self.rightTarget.updateValues()
-        self.noTarget.updateValues()
+        self.aSlice.updateValues()
+        self.bSlice.updateValues()
         
         idsToDel = set()
         for p,i in self.nodes.iteritems():
@@ -749,19 +653,12 @@ class PedigreeComponent(AppComponent):
                 self.corpses.add(i)
                 self.scene.removeItem(i)
             else:
-                i.updateValues([self.nodes[n] for n in self.iterLivingNeighbors(p, strict=True)])
+                i.updateValues()
         
         # Do some cleaning
         for p in idsToDel:
             del self.nodes[p]
         
-        self.refreshHiddenCounts()
-        self.refreshGenerations()
+        # TODO: do some dot iterations
         
-        # Finally, prep the next update by applying forces
-        for p,i in self.nodes.iteritems():
-            if not i.dead and not i.killed:
-                gen = self.appState.ped.getAttribute(p,'generation')
-                generation = self.generations[math.floor(gen)].union(self.generations[math.ceil(gen)])
-                i.applyForces(self.iterLivingNeighbors(p, strict=True),generation,0,self.right)
         self.scene.update()
