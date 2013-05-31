@@ -379,8 +379,7 @@ class Pedigree(object):
             p,l = toVisit.pop(0)
             if p not in visited:
                 visited.add(p)
-                e = self.g.edge[person]
-                for p2,attrs in e.iteritems():
+                for p2,attrs in self.g.edge[p].iteritems():
                     if not attrs['type'] in directions:
                         continue
                     if l < level:

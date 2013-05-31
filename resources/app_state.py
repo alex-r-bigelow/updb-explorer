@@ -36,13 +36,13 @@ class AppState(object):
     '''
     Color scheme obtained from colorbrewer2.org
     '''
-    BACKGROUND_COLOR = Qt.black
-    BORDER_COLOR = Qt.black
+    BACKGROUND_COLOR = Qt.white
+    BORDER_COLOR = Qt.white
     A_COLOR = QColor.fromRgb(51,160,44)   # dark green
     B_COLOR = QColor.fromRgb(178,223,138)   # light green
     INTERSECTION_COLOR = QColor.fromRgb(110,193,90)   # blend of the two
     HIGHLIGHT_COLOR = QColor.fromRgb(255,255,153)   # yellow
-    MISSING_COLOR = Qt.white
+    MISSING_COLOR = Qt.black
     
     CATEGORICAL_COLORS = [QColor.fromRgb(166, 206, 227),    # blues
                           QColor.fromRgb(31, 120, 180),
@@ -190,17 +190,12 @@ class AppState(object):
                 return AppState.CATEGORICAL_COLORS[v]
     
     def getColors(self, personID, alternate=1):
-        showFan = False
         if self.overlaidAttribute == None:
             fill = AppState.MISSING_COLOR
         else:
             fill = self.getColorForValue(self.ped.getAttribute(personID,self.overlaidAttribute,None), self.overlaidAttribute, alternate)
-        if personID == self.highlightedNode:
-            stroke = AppState.HIGHLIGHT_COLOR
-            showFan = True
-        else:
-            stroke = AppState.BORDER_COLOR
-        return (fill,stroke,showFan)
+        stroke = None
+        return (fill,stroke)
     
     def getFanColor(self, peopleIDs, alternate=1):
         # TODO
@@ -211,6 +206,13 @@ class AppState(object):
             if (s == source and t == target) or (s == target and t == source):
                 return AppState.HIGHLIGHT_COLOR
         return AppState.MISSING_COLOR
+    
+    def getPathPattern(self, source, target):
+        pathType = self.ped.getLink(source,target)
+        if pathType == self.ped.HUSBAND_TO_WIFE or pathType == self.ped.WIFE_TO_HUSBAND:
+            return Qt.DotLine
+        else:
+            return Qt.SolidLine
     
     def getHistoryPeople(self, historyID):
         if historyID == None or not self.history.node.has_key(historyID):
@@ -230,6 +232,10 @@ class AppState(object):
         for c in self.components:
             c.notifyShowIndividualDetails(n)
     
+    def clear(self):
+        self.changePedigreeB(None)
+        self.changePedigreeA(None)
+    
     def performUnion(self):
         self.addPedigree(self.aSet.union(self.bSet), parentIDs=[self.aHistoryID,self.bHistoryID])
     
@@ -245,8 +251,12 @@ class AppState(object):
             parentHistoryID = self.aHistoryID
         elif person in self.bSet:
             parentHistoryID = self.bHistoryID
-        newSet = self.getHistoryPeople(parentHistoryID).union(peopleToAdd)
-        self.addPedigree(newSet,[parentHistoryID])
+        if parentHistoryID != None:
+            newSet = self.getHistoryPeople(parentHistoryID).union(peopleToAdd)
+            self.addPedigree(newSet,[parentHistoryID])
+        else:
+            newID = self.addPedigree(peopleToAdd)
+            self.changePedigreeA(newID)
     
     def snip(self, person, directions):
         parentHistoryID = None
@@ -257,7 +267,8 @@ class AppState(object):
             parentHistoryID = self.aHistoryID
         elif person in self.bSet:
             parentHistoryID = self.bHistoryID
-        newSet = self.getHistoryPeople(parentHistoryID).discard(self.ped.iterFrom(person,directions,level=1,skipFirst=True))
+        peopleToDiscard = set(self.ped.iterFrom(person,directions,level=1,skipFirst=True))
+        newSet = self.getHistoryPeople(parentHistoryID).difference(peopleToDiscard)
         newSet = self.ped.getConnectedComponent(person,newSet)
         self.addPedigree(newSet,[parentHistoryID])
     
@@ -283,6 +294,8 @@ class AppState(object):
     
     def changePedigreeA(self, newID):
         previousID = self.aHistoryID
+        if previousID == newID:
+            return
         if newID == None:
             if self.bHistoryID != None:
                 newID = self.bHistoryID
@@ -304,6 +317,8 @@ class AppState(object):
     
     def changePedigreeB(self, newID):
         previousID = self.bHistoryID
+        if previousID == newID:
+            return
         if newID == None:
             self.bSet = set()
             self.abIntersection = set()

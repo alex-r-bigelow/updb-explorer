@@ -71,7 +71,7 @@ class TableComponent(QTableWidget,AppComponent):
     
     def setItem(self, row, column, item):
         QTableWidget.setItem(self,row,column,item)
-        item.setBackground(self.appState.MISSING_COLOR)
+        item.setBackground(self.appState.BACKGROUND_COLOR)
         self.numColumns = max(column,self.numColumns)
     
     def colorRow(self, person, color=None):
@@ -86,7 +86,7 @@ class TableComponent(QTableWidget,AppComponent):
             elif person in self.appState.bSet:
                 color = self.appState.B_COLOR
             else:
-                color = self.appState.MISSING_COLOR
+                color = self.appState.BACKGROUND_COLOR
         for c in xrange(self.numColumns+1):
             self.item(row,c).setBackground(QBrush(color))
     
@@ -120,6 +120,7 @@ class TableComponent(QTableWidget,AppComponent):
         
         for p in previousSet.symmetric_difference(newSet):  # only have to recolor stuff that changed
             self.colorRow(p)
+        self.update()
     
     def notifyChangePedigreeB(self, previousID, newID):
         previousSet = self.appState.getHistoryPeople(previousID)
