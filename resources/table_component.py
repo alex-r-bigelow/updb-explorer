@@ -88,7 +88,8 @@ class TableComponent(QTableWidget,AppComponent):
             else:
                 color = self.appState.BACKGROUND_COLOR
         for c in xrange(self.numColumns+1):
-            self.item(row,c).setBackground(QBrush(color))
+            i = self.item(row,c)
+            i.setBackground(QBrush(color))
     
     def notifyChangeOverlay(self, previous, new):
         self.headerObj.overlayIndex = new
@@ -113,6 +114,9 @@ class TableComponent(QTableWidget,AppComponent):
             self.colorRow(previous)
         if new != None:
             self.colorRow(new)
+    
+    def notifyShowIndividualDetails(self, person):
+        self.scrollToItem(self.idLookup[person])
     
     def notifyChangePedigreeA(self, previousID, newID):
         previousSet = self.appState.getHistoryPeople(previousID)

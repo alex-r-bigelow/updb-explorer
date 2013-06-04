@@ -1,9 +1,14 @@
-import random, math
+import random, math, networkx
 from PySide.QtGui import QGraphicsScene, QGraphicsItem, QPen, QPainterPath, QFont
 from PySide.QtCore import Qt, QRectF, QTimer
 from app_state import AppComponent
+import sys
 
 class fadeableGraphicsItem(QGraphicsItem):
+    '''
+    A visual screen object that keeps track of its own position and opacity; this guy
+    is responsible for all the animation. updateValues() should be called periodically
+    '''
     OPACITY_SPEED = 0.05
     HIDDEN_OPACITY = 0.0
     SPATIAL_SPEED = 1000.0
@@ -105,6 +110,9 @@ class fadeableGraphicsItem(QGraphicsItem):
         self.frozen = False
 
 class node(fadeableGraphicsItem):
+    '''
+    Graphical representation of a person in the pedigree
+    '''
     STROKE_WEIGHT = 6
     
     EXPANDED_RADIUS = 18
@@ -400,6 +408,9 @@ class node(fadeableGraphicsItem):
                 pass
 
 class ghostNode(object):
+    '''
+    A placeholder in our generations structure; the dot paper calls these "virtual" nodes
+    '''
     def __init__(self, generation, chunk, index, parent, child):
         self.generation = generation
         self.chunk = chunk
@@ -416,6 +427,9 @@ class ghostNode(object):
         return self.targetY
 
 class pedigreeSlice(fadeableGraphicsItem):
+    '''
+    The physical divider between segments of our pedigree
+    '''
     OPACITY_PROPORTION = 0.5
     THICKNESS = 5
     
@@ -433,6 +447,9 @@ class pedigreeSlice(fadeableGraphicsItem):
         painter.fillRect(-pedigreeSlice.THICKNESS*0.5,-self.height*0.5,pedigreeSlice.THICKNESS,self.height,self.brush)
 
 class pedigreeLabel(fadeableGraphicsItem):
+    '''
+    The label that floats in the background to tell us which pedigree is which
+    '''
     BOUNDING_BOX = QRectF(-200,-100,400,200)
     FONT = QFont('Helvetica',24)
     OPACITY_PROPORTION = 0.5
@@ -454,6 +471,9 @@ class pedigreeLabel(fadeableGraphicsItem):
         painter.drawText(pedigreeLabel.BOUNDING_BOX,Qt.AlignHCenter | Qt.AlignVCenter,self.text)
 
 class edgeLayer(QGraphicsItem):
+    '''
+    The thing that's responsible for drawing the connections between every non-killed node
+    '''
     MARRIAGE_PEN = QPen(Qt.black, 1.0, Qt.DotLine)
     NORMAL_PEN = QPen(Qt.black, 1.0, Qt.SolidLine)
     
@@ -477,47 +497,72 @@ class edgeLayer(QGraphicsItem):
                 lastNodes[p] = n
         return lastNodes
     
+    def drawLine(self, painter, p1, p2, x1, y1, x2, y2):
+        linkType = self.panel.appState.ped.getLink(p1,p2)
+        if linkType == self.panel.appState.ped.HUSBAND_TO_WIFE or \
+           linkType == self.panel.appState.ped.WIFE_TO_HUSBAND:
+            edgeLayer.MARRIAGE_PEN.setColor(self.panel.appState.getPathColor(p1,p2))
+            painter.setPen(edgeLayer.MARRIAGE_PEN)
+        else:
+            edgeLayer.NORMAL_PEN.setColor(self.panel.appState.getPathColor(p1,p2))
+            painter.setPen(edgeLayer.NORMAL_PEN)
+        
+        painter.drawLine(x1,y1,x2,y2)
+    
     def paint(self, painter, option, widget=None):
         painter.fillRect(0,0,self.panel.right,self.panel.bottom,self.panel.appState.BACKGROUND_COLOR)
         
-        lastNodes = None
-        for g in self.panel.generationOrder:
-            if g in self.panel.emptyGenerations:
-                continue
-            elif lastNodes == None:
-                lastNodes = self.getLastNodes(g)
-                continue
-            finishedLocalArcs = set()
-            for chunk in xrange(3):
-                for n1 in self.panel.generations[g][chunk]:
-                    p1 = n1
-                    while isinstance(p1,ghostNode):
-                        p1 = p1.child
-                    if not isinstance(n1,ghostNode):
-                        n1 = self.panel.nodes[p1]
-                    for p2,linkType in self.panel.appState.ped.iterNuclear(p1):
-                        if linkType == self.panel.appState.ped.HUSBAND_TO_WIFE or \
-                           linkType == self.panel.appState.ped.WIFE_TO_HUSBAND:
-                            edgeLayer.MARRIAGE_PEN.setColor(self.panel.appState.getPathColor(p1,p2))
-                            painter.setPen(edgeLayer.MARRIAGE_PEN)
-                        else:
-                            edgeLayer.NORMAL_PEN.setColor(self.panel.appState.getPathColor(p1,p2))
-                            painter.setPen(edgeLayer.NORMAL_PEN)
-                        
-                        if (p2,p1) not in finishedLocalArcs:
-                            if p2 in self.panel.generations[g][0] or \
-                               p2 in self.panel.generations[g][1] or \
-                               p2 in self.panel.generations[g][2]:
-                                n2 = self.panel.nodes[p2]
-                                painter.drawLine(n1.x(),n1.y(),n2.x(),n2.y())
-                                finishedLocalArcs.add((p1,p2))
-                        if lastNodes.has_key(p2):
-                            n2 = lastNodes[p2]
-                            color = self.panel.appState.getPathColor(p1,p2)
-                            painter.setPen(QPen(color, 1.5, self.panel.appState.getPathPattern(p1,p2)))
-                            painter.drawLine(n1.x(),n1.y(),n2.x(),n2.y())
-            lastNodes = self.getLastNodes(g)
-
+        finishedGhostNodes = set()
+        finishedEdges = set()
+        
+        for n in self.panel.iterGenerations():
+            if isinstance(n,ghostNode):
+                if n in finishedGhostNodes:
+                    continue
+                # get the ancestor and descendant so we know what type of line to draw
+                p = n.parent
+                c = n.child
+                while isinstance(p,ghostNode):
+                    p = p.parent
+                while isinstance(c,ghostNode):
+                    c = c.child
+                
+                # start with the highest relationship
+                n2 = n
+                while isinstance(n2.parent,ghostNode):
+                    n2 = n2.parent
+                
+                # work all the way down
+                while isinstance(n2.child,ghostNode):
+                    pn = n2.parent
+                    if not isinstance(pn,ghostNode):
+                        pn = self.panel.nodes[pn]
+                    self.drawLine(painter,p,c,pn.x(),pn.y(),n2.x(),n2.y())
+                    finishedGhostNodes.add(n2)
+                    n2 = n2.child
+                
+                # for the last one, we need to draw both the parent and child lines
+                pn = n2.parent
+                if not isinstance(pn,ghostNode):
+                    pn = self.panel.nodes[pn]
+                self.drawLine(painter,p,c,pn.x(),pn.y(),n2.x(),n2.y())
+                cn = self.panel.nodes[n2.child] # we already know the child isn't a ghostNode
+                self.drawLine(painter,p,c,n2.x(),n2.y(),cn.x(),cn.y())
+                finishedGhostNodes.add(n2)
+            else:
+                for n2 in self.panel.iterGenerationsFrom(person=n,
+                                                         directions=[node.DOWN,node.HORIZONTAL],
+                                                         relationships=None,
+                                                         level=1,
+                                                         skipFirst=True,
+                                                         yieldGhosts=False):
+                    pn = self.panel.nodes[n]
+                    cn = self.panel.nodes[n2]
+                    if (pn,cn) in finishedEdges or (cn,pn) in finishedEdges:
+                        continue
+                    self.drawLine(painter, n, n2, pn.x(), pn.y(), cn.x(), cn.y())
+                    finishedEdges.add((pn,cn))
+            
 class PedigreeComponent(AppComponent):
     FRAME_DURATION = 1000/60 # 60 FPS
     
@@ -527,11 +572,31 @@ class PedigreeComponent(AppComponent):
         self.appState.registerComponent(self)
         
         self.nodes = {}
-        self.corpses = set()
+        self.corpses = set()    # A bug in PySide doesn't allow us to just throw
+                                # away items once they've been removed from the
+                                # scene; we have to hold on to a reference for a
+                                # while or we'll get a seg fault
         
+        # This is our big ugly structure that is responsible for sorting nodes;
+        # it looks like this: {generation number: ([a],[i],[b])}
+        # where a is the list/"chunk" of people in that generation that are in
+        # self.appState.aSet, etc.
         self.generations = {}
+        # Generations are not necessarily well-behaved; we use this list for iterating in order
         self.generationOrder = []
-        self.emptyGenerations = set()
+        # If we want to know where a person lives in our structure, this is:
+        # {person: (generation number, chunk number 0-2, index in that chunk)
+        self.generationLookup = {}
+        # We also need to know in several places the relationships between individuals
+        # that are in our generations
+        self.generationNetwork = networkx.DiGraph()
+        # These are the maximum widths of each chunk; useful when drawing
+        self.aWidth = 0
+        self.iWidth = 0
+        self.bWidth = 0
+        # A flag that tells us we should bother trying to rearrange the orders
+        # within the chunks
+        self.rearrange = True
         
         self.scene = QGraphicsScene()
         self.view.setScene(self.scene)
@@ -626,7 +691,7 @@ class PedigreeComponent(AppComponent):
         self.refreshHiddenCounts()
     
     def refreshGenerations(self):
-        # Keep everyone in the same order that hasn't been killed or moved; don't worry about the ghost nodes
+        # Keep everyone in the same order that hasn't been killed or moved; also ignore ghost nodes for now
         oldPeople = set()
         movedFromA = set()
         movedFromIntersection = set()
@@ -634,33 +699,39 @@ class PedigreeComponent(AppComponent):
         newGenerations = {}
         for g in self.generationOrder:
             a,i,b = self.generations[g]
-            newGenerations[g] = ([],[],[])
+            newGen = ([],[],[])
+            hasData = False
             for p in a:
                 if not isinstance(p,ghostNode) and not self.nodes[p].killed:
+                    hasData = True
                     if p in self.appState.aSet:
                         oldPeople.add(p)
-                        newGenerations[g][0].append(p)
+                        newGen[0].append(p)
                     else:
                         movedFromA.add(p)
             for p in i:
                 if not isinstance(p,ghostNode) and not self.nodes[p].killed:
+                    hasData = True
                     if p in self.appState.abIntersection:
                         oldPeople.add(p)
-                        newGenerations[g][1].append(p)
+                        newGen[1].append(p)
                     else:
                         movedFromIntersection.add(p)
             for p in b:
                 if not isinstance(p,ghostNode) and not self.nodes[p].killed:
+                    hasData = True
                     if p in self.appState.bSet:
                         oldPeople.add(p)
-                        newGenerations[g][2].append(p)
+                        newGen[2].append(p)
                     else:
                         movedFromB.add(p)
+            if hasData:
+                newGenerations[g] = newGen
         self.generations = newGenerations
         
         # Now add everyone that is new, as well as people that were moved to new areas
         for p in self.nodes.iterkeys():
-            if p in oldPeople:
+            if p in oldPeople or not self.nodes.has_key(p) or self.nodes[p].killed:
                 continue
             g = self.appState.ped.getAttribute(p,'generation')
             if not self.generations.has_key(g):
@@ -686,37 +757,34 @@ class PedigreeComponent(AppComponent):
                 raise Exception('Attempted to add a node to the view that isn\'t in either set A or B!')
         self.generationOrder = sorted(self.generations.iterkeys())
         
-        # Now we need to know which generations actually have people in them, and which relationships span more than one generation
-        numGenerations = 0
-        self.emptyGenerations = set()
-        relationshipsThatNeedGhosts = {}
-        for g1 in self.generationOrder:
-            if len(self.generations[g1][0]) > 0 or len(self.generations[g1][1]) > 0 or len(self.generations[g1][2]) > 0:
-                numGenerations += 1
-                for c1,chunk in enumerate(self.generations[g1]):
-                    for i1, p1 in enumerate(chunk):
-                        for p2,linkType in self.appState.ped.iterNuclear(p1):  # @UnusedVariable
-                            g2 = self.appState.ped.getAttribute(p2,'generation')
-                            if abs(g2-g1) > 1 and not relationshipsThatNeedGhosts.has_key((p2,p)):
-                                if p2 in self.appState.abIntersection:
-                                    i2 = self.generations[g2][1].index(p2)
-                                    c2 = 1
-                                elif p2 in self.appState.aSet:
-                                    i2 = self.generations[g2][0].index(p2)
-                                    c2 = 0
-                                elif p2 in self.appState.bSet:
-                                    i2 = self.generations[g2][2].index(p2)
-                                    c2 = 2
-                                else:
-                                    assert not self.nodes.has_key(p2) or self.nodes[p2].killed
-                                    continue
-                                relationshipsThatNeedGhosts[(p,p2)] = (g1,c1,i1,g2,c2,i2)
-            else:
-                self.emptyGenerations.add(g1)
-        
-        if numGenerations == 0:
+        if len(self.generations) == 0:
             # at this point we know for sure there is no data currently displayed
             return
+        
+        # Now we need to know which relationships span more than one generation
+        relationshipsThatNeedGhosts = {}
+        for g1 in self.generationOrder:
+            assert len(self.generations[g1][0]) > 0 or len(self.generations[g1][1]) > 0 or len(self.generations[g1][2]) > 0
+            for c1,chunk in enumerate(self.generations[g1]):
+                for i1, p1 in enumerate(chunk):
+                    for p2,linkType in self.iterLivingNuclear(p1, strict=True):  # @UnusedVariable
+                        g2 = self.appState.ped.getAttribute(p2,'generation')
+                        if abs(g2-g1) > 1 and \
+                           not relationshipsThatNeedGhosts.has_key((p2,p1)) and \
+                           not relationshipsThatNeedGhosts.has_key((p1,p2)):
+                            if p2 in self.appState.abIntersection:
+                                i2 = self.generations[g2][1].index(p2)
+                                c2 = 1
+                            elif p2 in self.appState.aSet:
+                                i2 = self.generations[g2][0].index(p2)
+                                c2 = 0
+                            elif p2 in self.appState.bSet:
+                                i2 = self.generations[g2][2].index(p2)
+                                c2 = 2
+                            else:
+                                print p2
+                                sys.exit(1)
+                            relationshipsThatNeedGhosts[(p1,p2)] = (g1,c1,i1,g2,c2,i2)
         
         # Now determine where ghosts need to be created by interpolating list indices linearly
         ghosts = {}
@@ -747,22 +815,22 @@ class PedigreeComponent(AppComponent):
             
             generationsNeedingGhosts = []
             for g in self.generationOrder[start+1:stop]:
-                if g not in self.emptyGenerations:
-                    generationsNeedingGhosts.append(g)
+                generationsNeedingGhosts.append(g)
             if len(generationsNeedingGhosts) == 0:
                 continue
             
             spanningIndex1 = i1
-            temp = c1
-            while temp > 0:
-                temp = temp-1
-                spanningIndex1 += len(self.generations[g1][temp])
+            if c1 >= 1:
+                spanningIndex1 += len(self.generations[g1][0])
+            if c1 == 2:
+                spanningIndex1 += len(self.generations[g1][1])
+            
             spanningIndex2 = i2
-            temp = c2
-            while temp > 0:
-                temp = temp-1
-                spanningIndex2 += len(self.generations[g2][temp])
-            indexIncrement = 1.0/len(generationsNeedingGhosts)*(spanningIndex2-spanningIndex1)
+            if c2 >= 1:
+                spanningIndex2 += len(self.generations[g2][0])
+            if c2 == 2:
+                spanningIndex2 += len(self.generations[g2][1])
+            indexIncrement = float(spanningIndex2-spanningIndex1)/len(generationsNeedingGhosts)
             
             lastGhost = p1
             for n,g in enumerate(generationsNeedingGhosts):
@@ -780,33 +848,147 @@ class PedigreeComponent(AppComponent):
         for ghost,(g,c,i) in ghosts.iteritems():
             self.generations[g][c].insert(i,ghost)
         
-        # Now update screen targets; first we need to know the widest generation in each section
-        aWidth = 0
-        iWidth = 0
-        bWidth = 0
+        # Update our convenience structures
+        self.indexGenerations()
+        
+        # Finally, update stuff on the screen
+        self.updateScreenPositions()
+        self.rearrange = True
+    
+    def indexGenerations(self):
+        '''
+        builds convenience structures for lookups / traversal our complicated generation dict
+        '''
+        self.generationLookup = {}
+        self.generationNetwork = networkx.DiGraph()
+        widths = [0,0,0]
+        lastRow = set()
+        for g in self.generationOrder:
+            chunks = self.generations[g]
+            currentRow = set()
+            currentRow.update(chunks[0])
+            currentRow.update(chunks[1])
+            currentRow.update(chunks[2])
+            for chunkNo,chunk in enumerate(chunks):
+                widths[chunkNo] = max(len(chunk),widths[chunkNo])
+                for index,p in enumerate(chunk):
+                    self.generationLookup[p] = (g,chunkNo,index)
+                    self.generationNetwork.add_node(p)
+                    if isinstance(p,ghostNode):
+                        ancestor = p.parent
+                        while isinstance(ancestor,ghostNode):
+                            ancestor = ancestor.parent
+                        descendant = p.child
+                        while isinstance(descendant,ghostNode):
+                            descendant = descendant.child
+                        downLink = self.appState.ped.getLink(ancestor,descendant)
+                        upLink = self.appState.ped.getLink(descendant,ancestor)
+                        
+                        self.generationNetwork.add_edge(p,p.parent,{'dir':node.UP,'link':upLink})
+                        self.generationNetwork.add_edge(p.parent,p,{'dir':node.DOWN,'link':downLink})
+                        self.generationNetwork.add_edge(p,p.child,{'dir':node.DOWN,'link':downLink})
+                        self.generationNetwork.add_edge(p.child,p,{'dir':node.UP,'link':upLink})
+                    else:
+                        for p2,linkType in self.iterLivingNuclear(p, strict=True):
+                            assert self.appState.ped.getLink(p,p2) != None
+                            self.generationNetwork.add_edge(p,p2,{'link':linkType})
+                            if p2 in lastRow:
+                                self.generationNetwork.add_edge(p,p2,{'dir':node.UP})
+                                self.generationNetwork.add_edge(p2,p,{'dir':node.DOWN})
+                            elif p2 in currentRow:
+                                self.generationNetwork.add_edge(p,p2,{'dir':node.HORIZONTAL})
+                                self.generationNetwork.add_edge(p2,p,{'dir':node.HORIZONTAL})
+            lastRow = currentRow
+        self.aWidth = widths[0]
+        self.iWidth = widths[1]
+        self.bWidth = widths[2]
+    
+    def refreshHiddenCounts(self):
+        '''
+        Each node needs to know how many people are visible next to it
+        '''
+        for a in self.nodes.iterkeys():
+            self.nodes[a].hiddenParents = self.nodes[a].allParents
+            self.nodes[a].hiddenChildren = self.nodes[a].allChildren
+            self.nodes[a].hiddenSpouses = self.nodes[a].allSpouses
+            for b,l in self.iterLivingNuclear(a, strict=True):  # @UnusedVariable
+                if l == self.appState.ped.PARENT_TO_CHILD:
+                    self.nodes[a].hiddenChildren -= 1
+                elif l == self.appState.ped.CHILD_TO_PARENT:
+                    self.nodes[a].hiddenParents -= 1
+                else:
+                    self.nodes[a].hiddenSpouses -= 1
+    
+    def iterLivingNuclear(self, person, strict=False):
+        '''
+        Helper function independent of our convenience structures (it's used to create the
+        generations dict and convenience structures in the first place)
+        '''
+        if not self.nodes.has_key(person) or self.nodes[person].dead or (strict and self.nodes[person].killed):
+            raise StopIteration
+        else:
+            for b,l in self.appState.ped.iterNuclear(person):
+                if not self.nodes.has_key(b) or self.nodes[b].dead or (strict and self.nodes[b].killed):
+                    continue
+                yield (b,l)
+    
+    def iterGenerationsFrom(self, person, directions=None, relationships=None, level=1, skipFirst=True, yieldGhosts=True):
+        '''
+        BFS among generation elements, only in the specified directions (generation space)
+        and/or relationships (pedigree space)
+        '''
+        if directions == None:
+            directions = [node.UP,
+                          node.DOWN,
+                          node.HORIZONTAL]
+        if relationships == None:
+            relationships = [self.appState.ped.PARENT_TO_CHILD,
+                             self.appState.ped.CHILD_TO_PARENT,
+                             self.appState.ped.HUSBAND_TO_WIFE,
+                             self.appState.ped.WIFE_TO_HUSBAND]
+        # BFS only along specified directions and relationships
+        toVisit = [(person,0)]
+        visited = set()
+        while len(toVisit) > 0:
+            p,l = toVisit.pop(0)
+            if p not in visited:
+                visited.add(p)
+                if not isinstance(p,ghostNode):
+                    for p2,attrs in self.generationNetwork.edge[p].iteritems():
+                        assert isinstance(p2,ghostNode) or self.appState.ped.getLink(p,p2) != None
+                        if not attrs.has_key('dir') or not attrs['dir'] in directions or not attrs['link'] in relationships:
+                            continue
+                        if l < level:
+                            toVisit.append((p2,l+1))
+                if (p != person or not skipFirst) and (not isinstance(p,ghostNode) or yieldGhosts):
+                    yield p
+    
+    def iterGenerations(self):
+        for g in self.generationOrder:
+            for chunk in self.generations[g]:
+                for p in chunk:
+                    yield p
+    
+    def updateScreenPositions(self):
         numNonEmpty = 0
-        for g,(a,i,b) in self.generations.iteritems():
-            aWidth = max(len(a),aWidth)
-            iWidth = max(len(i),iWidth)
-            bWidth = max(len(b),bWidth)
-        if aWidth > 0:
+        if self.aWidth > 0:
             numNonEmpty += 1
-        if iWidth > 0:
+        if self.iWidth > 0:
             numNonEmpty += 1
-        if bWidth > 0:
+        if self.bWidth > 0:
             numNonEmpty += 1
         
         # set the slice, label target positions, as well as the spacing between each node
-        yincrement = (self.bottom-node.EXPANDED_RADIUS*2)/max(numGenerations-1,2)
+        yincrement = (self.bottom-node.EXPANDED_RADIUS*2)/max(len(self.generations)-1,2)
         # a two-generation pedigree across the top and bottom looks funny... use the middle
         # for pedigrees of low depth (and width in xincrement). This also prevents division
         # by 0 problems
         if numNonEmpty > 1:
-            xincrement = (self.right-node.EXPANDED_RADIUS*2)/max(aWidth+iWidth+bWidth+1,2)  
+            xincrement = (self.right-node.EXPANDED_RADIUS*2)/max(self.aWidth+self.iWidth+self.bWidth+1,2)  
             # the extra width is for the slices
             
-            self.aSlice.targetX = aWidth*xincrement
-            self.bSlice.targetX = (aWidth+1+iWidth)*xincrement
+            self.aSlice.targetX = self.aWidth*xincrement
+            self.bSlice.targetX = (self.aWidth+1+self.iWidth)*xincrement
             self.aLabel.targetX = self.aSlice.targetX / 2
             self.iLabel.targetX = self.aSlice.targetX + (self.aSlice.targetX+self.bSlice.targetX)/2
             self.bLabel.targetX = (self.bSlice.targetX + self.right)/2
@@ -816,7 +998,7 @@ class PedigreeComponent(AppComponent):
             self.iLabel.show()
             self.bLabel.show()
         else:
-            xincrement = (self.right-node.EXPANDED_RADIUS*2)/max(aWidth+iWidth+bWidth-1,2)
+            xincrement = (self.right-node.EXPANDED_RADIUS*2)/max(self.aWidth+self.iWidth+self.bWidth-1,2)
             for item in [self.aSlice,self.bSlice,self.aLabel,self.bLabel,self.iLabel]:
                 item.targetX = self.right
                 item.hide()
@@ -824,12 +1006,14 @@ class PedigreeComponent(AppComponent):
         # set the node target positions
         y = node.EXPANDED_RADIUS   # start with an offset; nodes are drawn from the center
         for g in self.generationOrder:
-            if g in self.emptyGenerations:
-                continue
             a,i,b = self.generations[g]
             
-            # align a to the left
-            x = node.EXPANDED_RADIUS
+            # TODO: align to the widest row - for now I align in the center
+            aCenterSpace = (self.aWidth-len(a))*xincrement/2
+            iCenterSpace = (self.iWidth-len(i))*xincrement/2
+            bCenterSpace = (self.bWidth-len(b))*xincrement/2
+            
+            x = node.EXPANDED_RADIUS + aCenterSpace
             for p in a:
                 if isinstance(p,ghostNode):
                     item = p
@@ -839,8 +1023,7 @@ class PedigreeComponent(AppComponent):
                 item.targetY = y
                 x += xincrement
             
-            # TODO: align i to the center
-            x = node.EXPANDED_RADIUS + (aWidth)*xincrement
+            x = node.EXPANDED_RADIUS + (self.aWidth)*xincrement + iCenterSpace
             if numNonEmpty > 1:
                 x += xincrement     # space for the slice
             
@@ -853,8 +1036,7 @@ class PedigreeComponent(AppComponent):
                 item.targetY = y
                 x += xincrement
             
-            # TODO: align b to the right
-            x = node.EXPANDED_RADIUS + (aWidth+iWidth)*xincrement
+            x = node.EXPANDED_RADIUS + (self.aWidth+self.iWidth)*xincrement + bCenterSpace
             if numNonEmpty > 1:
                 x += xincrement*2   # space for the slices
             for p in b:
@@ -868,32 +1050,158 @@ class PedigreeComponent(AppComponent):
             
             y += yincrement
     
-    def refreshHiddenCounts(self):
-        for a in self.nodes.iterkeys():
-            self.nodes[a].hiddenParents = 0
-            self.nodes[a].hiddenChildren = 0
-            self.nodes[a].hiddenSpouses = 0
-            for b,l in self.appState.ped.iterNuclear(a):
-                if self.nodes.has_key(b) and not self.nodes[b].killed:
-                    continue
-                elif l == self.appState.ped.PARENT_TO_CHILD:
-                    self.nodes[a].hiddenChildren += 1
-                elif l == self.appState.ped.CHILD_TO_PARENT:
-                    self.nodes[a].hiddenParents += 1
-                else:
-                    self.nodes[a].hiddenSpouses += 1
-    
-    def iterLivingNeighbors(self, person, strict=False):
-        if not self.nodes.has_key(person) or self.nodes[person].dead or (strict and self.nodes[person].killed):
-            raise StopIteration
+    def medianValue(self, neighbors):
+        neighbors.sort()
+        m = int(len(neighbors)/2)
+        if len(neighbors) == 0:
+            return -1.0
+        elif len(neighbors) % 2 == 1:
+            return neighbors[m]
+        elif len(neighbors) == 2:
+            return (neighbors[0]+neighbors[1])/2.0
         else:
-            for b,l in self.appState.ped.iterNuclear(person):  # @UnusedVariable
-                if not self.nodes.has_key(b) or self.nodes[b].dead or (strict and self.nodes[b].killed):
-                    continue
-                yield b
+            left = neighbors[m-1]-neighbors[0]
+            right = neighbors[-1]-neighbors[m]
+            return (neighbors[m-1]*right + neighbors[m]*left)/(left+right)
     
-    def minimizeCrossings(self, iterations=10):
-        pass
+    def countCrossings(self, person):
+        '''
+        Counts the number of edges that cross; relies heavily on the convenience structures
+        '''
+        totalCrossings = 0
+        # secondary sort by index
+        parents = sorted(self.iterGenerationsFrom(person,
+                                                  directions=[node.UP],
+                                                  relationships=None,
+                                                  level=1,
+                                                  skipFirst=True,
+                                                  yieldGhosts=True),
+                         key=lambda parent: self.generationLookup[parent][2])
+        if len(parents) == 0:
+            return 0
+        # primary sort by chunk number
+        parents = sorted(parents, key=lambda parent: self.generationLookup[parent][1])
+        
+        # we need every person in the last generation in between the leftmost parent and the rightmost one
+        parentSpanPeeps = []
+        gen = self.generationLookup[parents[0]][0]
+        chunk = self.generationLookup[parents[0]][1]
+        index = self.generationLookup[parents[0]][2]
+        while chunk <= self.generationLookup[parents[-1]][1] and chunk < 3:
+            while index <= self.generationLookup[parents[-1]][2] and index < len(self.generations[gen][chunk]):
+                parentSpanPeeps.append(self.generations[gen][chunk][index])
+                index += 1
+            index = 0
+            chunk += 1
+        
+        parents = set(parents)
+        
+        myChunk = self.generationLookup[person][1]
+        myIndex = self.generationLookup[person][2]
+        
+        for p2 in parentSpanPeeps:
+            numParentsToTheLeft = 0
+            numParentsToTheRight = len(parents)
+            if p2 in parents:
+                numParentsToTheLeft += 1
+                numParentsToTheRight -= 1
+            else:
+                # we need to know the number of children of this unrelated person to the left and right of person
+                unrelatedLeftNeighbors = 0
+                unrelatedRightNeighbors = 0
+                for p3 in self.iterGenerationsFrom(p2,
+                                                   directions=[node.DOWN],
+                                                   relationships=None,
+                                                   level=1,
+                                                   skipFirst=True,
+                                                   yieldGhosts=True):
+                    if self.generationLookup[p3][1] < myChunk:
+                        unrelatedLeftNeighbors += 1
+                    elif self.generationLookup[p3][1] > myChunk:
+                        unrelatedRightNeighbors += 1
+                    else:
+                        assert self.generationLookup[p3][2] != myIndex
+                        if self.generationLookup[p3][2] < myIndex:
+                            unrelatedLeftNeighbors += 1
+                        elif self.generationLookup[p3][2] > myIndex:
+                            unrelatedRightNeighbors += 1
+                totalCrossings += numParentsToTheLeft * unrelatedLeftNeighbors + \
+                                  numParentsToTheRight * unrelatedRightNeighbors
+        return totalCrossings
+    
+    def countAllCrossings(self):
+        totalCrossings = 0
+        for p in self.iterGenerations():
+            totalCrossings += self.countCrossings(p)
+        return totalCrossings
+    
+    def minimizeCrossings(self, iterations=9, startTop=True):
+        newGenerations = {}
+        maxCrossings = float('inf')
+        triedOnce = False
+        for iterNo in xrange(iterations):  # @UnusedVariable
+            if startTop:
+                gOrder = self.generationOrder
+            else:
+                gOrder = reversed(self.generationOrder)
+            
+            # First sort the indices using the dot layout median weighting scheme
+            for g in gOrder:
+                newChunks = [[],[],[]]
+                for chunkNo,chunk in enumerate(self.generations[g]):
+                    weights = {}
+                    for p in chunk:
+                        neighbors = self.iterGenerationsFrom(p,
+                                                             directions=[node.UP,node.HORIZONTAL],
+                                                             relationships=None,
+                                                             level=1,
+                                                             skipFirst=True,
+                                                             yieldGhosts=True)
+                        indices = []
+                        for n in neighbors:
+                            spanningIndex = self.generationLookup[n][2]
+                            if self.generationLookup[n][1] >= 1:
+                                spanningIndex += self.aWidth
+                            if self.generationLookup[n][1] == 2:
+                                spanningIndex += self.iWidth
+                            indices.append(spanningIndex)
+                        weights[p] = self.medianValue(indices)
+                    newChunks[chunkNo] = sorted(chunk, key=lambda p: weights[p])
+                newGenerations[g] = tuple(newChunks)
+                
+            # TODO: transpose step
+            
+            oldGenerations = self.generations
+            oldGenerationOrder = self.generationOrder
+            oldGenerationLookup = self.generationLookup
+            oldGenerationNetwork = self.generationNetwork
+            oldAWidth = self.aWidth
+            oldIWidth = self.iWidth
+            oldBWidth = self.bWidth
+            
+            self.generations = newGenerations
+            self.generationOrder = sorted(self.generations.keys())
+            self.indexGenerations()
+            
+            crossings = self.countAllCrossings()
+            if crossings < maxCrossings:
+                maxCrossings = crossings
+                triedOnce = False
+            else:
+                self.generations = oldGenerations
+                self.generationOrder = oldGenerationOrder
+                self.generationLookup = oldGenerationLookup
+                self.generationNetwork = oldGenerationNetwork
+                self.aWidth = oldAWidth
+                self.iWidth = oldIWidth
+                self.bWidth = oldBWidth
+                
+                if not triedOnce:
+                    triedOnce = True
+                else:
+                    self.rearrange = False
+                    return
+            startTop = not startTop # alternate top to bottom and bottom to top
     
     def updateValues(self):
         self.aSlice.updateValues()
@@ -912,6 +1220,8 @@ class PedigreeComponent(AppComponent):
         for p in idsToDel:
             del self.nodes[p]
         
-        self.minimizeCrossings()
+        if self.rearrange:
+            self.minimizeCrossings()
+            self.updateScreenPositions()
         
         self.scene.update()

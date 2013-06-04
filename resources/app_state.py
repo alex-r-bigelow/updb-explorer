@@ -30,7 +30,7 @@ class AppComponent(object):
 
 class AppPreferences(object):
     def __init__(self):
-        self.binColors = True
+        self.binColors = False
 
 class AppState(object):
     '''
@@ -153,8 +153,8 @@ class AppState(object):
     
     def getOrdinalColor(self, value, alternate=1):
         if self.binColors:
-            lowerIndex = int(math.floor(4.0*value))
-            higherIndex = int(math.ceil(4.0*value))
+            lowerIndex = int(math.floor(1.0*value))
+            higherIndex = int(math.ceil(1.0*value))
             closerIndex = lowerIndex if value-math.floor(value) < math.ceil(value)-value else higherIndex
             if alternate == 2:
                 return AppState.ORDINAL_COLORS_2[closerIndex]
