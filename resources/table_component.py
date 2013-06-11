@@ -120,15 +120,14 @@ class TableComponent(QTableWidget,AppComponent):
     
     def notifyChangePedigreeA(self, previousID, newID):
         previousSet = self.appState.getHistoryPeople(previousID)
-        newSet = self.appState.getHistoryPeople(previousID)
+        newSet = self.appState.getHistoryPeople(newID)
         
         for p in previousSet.symmetric_difference(newSet):  # only have to recolor stuff that changed
             self.colorRow(p)
-        self.update()
     
     def notifyChangePedigreeB(self, previousID, newID):
         previousSet = self.appState.getHistoryPeople(previousID)
-        newSet = self.appState.getHistoryPeople(previousID)
+        newSet = self.appState.getHistoryPeople(newID)
         
         for p in previousSet.symmetric_difference(newSet):  # only have to recolor stuff that changed
             self.colorRow(p)

@@ -29,6 +29,7 @@ class loading(object):
                          'is_root':self.window.is_root,
                          'is_leaf':self.window.is_leaf,
                          'generation':self.window.generation}
+        self.requiredForCalculateD = set(['personID','paID','maID','sex','affected'])
         self.header = []
         self.lowerHeader = []
         
@@ -57,12 +58,25 @@ class loading(object):
         self.window.inputField.setText(fileName)
         self.switchPrograms()
     
-    def updateOverrides(self):
+    def switchPrograms(self):
+        currentProgram = self.window.programBox.currentText()
+        if currentProgram == 'calculateD':
+            enableButtonBox = os.path.exists(self.window.inputField.text()) and os.path.exists(os.path.split(self.window.outputField.text())[0])
+            self.window.outputArea.setEnabled(True)
+            self.window.generateLabel.show()
+        else:
+            enableButtonBox = os.path.exists(self.window.inputField.text())
+            self.window.outputArea.setEnabled(False)
+            self.window.generateLabel.hide()
+        
         fileName = self.window.inputField.text()
         if not os.path.exists(fileName):
             self.window.buttonBox.setEnabled(False)
-            for b in self.overrides.itervalues():
+            for d,b in self.overrides.iteritems():
+                text = b.currentText()
                 b.clear()
+                if text != "":
+                    b.setEditText(text)
             self.header = []
             self.lowerHeader = []
         else:
@@ -72,29 +86,32 @@ class loading(object):
                     self.lowerHeader.append(h.lower())
             infile.close()
             for d,b in self.overrides.iteritems():
+                text = b.currentText()
+                b.clear()
                 b.addItems(self.header)
-                if d in self.header:
+                if text != "":
+                    b.setEditText(text)
+                    if text not in self.header:
+                        if d in self.requiredForCalculateD:
+                            enableButtonBox = False
+                        elif currentProgram == 'vis':
+                            enableButtonBox = False
+                elif d in self.header:
                     b.setEditText(d)
                 elif d.lower() in self.lowerHeader:
                     b.setEditText(self.header[self.lowerHeader.index(d.lower())])
                 else:
                     b.setEditText('')
+                    if d in self.requiredForCalculateD:
+                        enableButtonBox = False
+                    elif currentProgram == 'vis':
+                        enableButtonBox = False
+            self.window.buttonBox.setEnabled(enableButtonBox)
     
     def browseOutput(self):
         fileName = QFileDialog.getSaveFileName(caption=u"Save file")[0]
         self.window.outputField.setText(fileName)
         self.switchPrograms()
-    
-    def switchPrograms(self):
-        if self.window.programBox.currentText() == 'calculateD':
-            self.window.buttonBox.setEnabled(os.path.exists(self.window.inputField.text()) and os.path.exists(os.path.split(self.window.outputField.text())[0]))
-            self.window.outputArea.setEnabled(True)
-            self.window.generateLabel.show()
-        else:
-            self.window.buttonBox.setEnabled(os.path.exists(self.window.inputField.text()))
-            self.window.outputArea.setEnabled(False)
-            self.window.generateLabel.hide()
-        self.updateOverrides()
     
     def go(self):
         global visWindow

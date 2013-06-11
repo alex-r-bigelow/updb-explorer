@@ -38,10 +38,10 @@ class AppState(object):
     '''
     BACKGROUND_COLOR = Qt.white
     BORDER_COLOR = Qt.white
-    A_COLOR = QColor.fromRgb(51,160,44)   # dark green
-    B_COLOR = QColor.fromRgb(178,223,138)   # light green
-    INTERSECTION_COLOR = QColor.fromRgb(110,193,90)   # blend of the two
-    HIGHLIGHT_COLOR = QColor.fromRgb(255,255,153)   # yellow
+    A_COLOR = QColor.fromRgb(27,158,119)
+    B_COLOR = QColor.fromRgb(117,112,179)
+    INTERSECTION_COLOR = QColor.fromRgb(217,95,2)
+    HIGHLIGHT_COLOR = QColor.fromRgb(230,171,2)   # yellow
     MISSING_COLOR = Qt.black
     
     CATEGORICAL_COLORS = [QColor.fromRgb(166, 206, 227),    # blues
@@ -190,7 +190,9 @@ class AppState(object):
                 return AppState.CATEGORICAL_COLORS[v]
     
     def getColors(self, personID, alternate=1):
-        if self.overlaidAttribute == None:
+        if personID == self.highlightedNode:
+            fill = AppState.HIGHLIGHT_COLOR
+        elif self.overlaidAttribute == None:
             fill = AppState.MISSING_COLOR
         else:
             fill = self.getColorForValue(self.ped.getAttribute(personID,self.overlaidAttribute,None), self.overlaidAttribute, alternate)
@@ -330,7 +332,7 @@ class AppState(object):
             self.bHistoryID = newID
         
         for c in self.components:
-            c.notifyChangePedigreeA(previousID, newID)
+            c.notifyChangePedigreeB(previousID, newID)
     
     def higlightHistory(self, highlightedID):
         previous = self.highlightedHistory

@@ -450,9 +450,9 @@ class pedigreeLabel(fadeableGraphicsItem):
     '''
     The label that floats in the background to tell us which pedigree is which
     '''
-    BOUNDING_BOX = QRectF(-200,-100,400,200)
-    FONT = QFont('Helvetica',24)
-    OPACITY_PROPORTION = 0.5
+    BOUNDING_BOX = QRectF(-400,-400,800,800)
+    FONT = QFont('Helvetica',128)
+    OPACITY_PROPORTION = 0.25
     
     def __init__(self, text, color, x, y):
         fadeableGraphicsItem.__init__(self, x, y)
@@ -467,7 +467,6 @@ class pedigreeLabel(fadeableGraphicsItem):
         painter.setOpacity(self.opacity*pedigreeLabel.OPACITY_PROPORTION)
         painter.setFont(pedigreeLabel.FONT)
         painter.setPen(self.pen)
-        painter.fillRect(pedigreeLabel.BOUNDING_BOX,Qt.black)
         painter.drawText(pedigreeLabel.BOUNDING_BOX,Qt.AlignHCenter | Qt.AlignVCenter,self.text)
 
 class edgeLayer(QGraphicsItem):
@@ -620,12 +619,12 @@ class PedigreeComponent(AppComponent):
         self.bSlice.hide()
         
         # Labels
-        self.aLabel = pedigreeLabel("Pedigree A",self.appState.A_COLOR,
+        self.aLabel = pedigreeLabel("A",self.appState.A_COLOR,
                                     self.right,self.bottom/2)
         self.scene.addItem(self.aLabel)
         self.aLabel.hide()
         
-        self.bLabel = pedigreeLabel("Pedigree B",self.appState.B_COLOR,
+        self.bLabel = pedigreeLabel("B",self.appState.B_COLOR,
                                     self.right,self.bottom/2)
         self.scene.addItem(self.bLabel)
         self.bLabel.hide()
@@ -704,7 +703,7 @@ class PedigreeComponent(AppComponent):
             for p in a:
                 if not isinstance(p,ghostNode) and not self.nodes[p].killed:
                     hasData = True
-                    if p in self.appState.aSet:
+                    if p in self.appState.aSet and p not in self.appState.abIntersection:
                         oldPeople.add(p)
                         newGen[0].append(p)
                     else:
@@ -720,7 +719,7 @@ class PedigreeComponent(AppComponent):
             for p in b:
                 if not isinstance(p,ghostNode) and not self.nodes[p].killed:
                     hasData = True
-                    if p in self.appState.bSet:
+                    if p in self.appState.bSet and not p in self.appState.abIntersection:
                         oldPeople.add(p)
                         newGen[2].append(p)
                     else:
@@ -736,7 +735,7 @@ class PedigreeComponent(AppComponent):
             g = self.appState.ped.getAttribute(p,'generation')
             if not self.generations.has_key(g):
                 self.generations[g] = ([],[],[])
-            if p in self.appState.aSet:
+            if p in self.appState.aSet and not p in self.appState.abIntersection:
                 if p in movedFromIntersection or p in movedFromB:
                     self.generations[g][0].append(p)    # moved people should start on the right
                 else:
@@ -748,7 +747,7 @@ class PedigreeComponent(AppComponent):
                     self.generations[g][1].append(0)    # moved people from B should start on the right
                 else:
                     self.generations[g][1].insert(len(self.generations[g][1])/2,p)  # don't think this is actually possible, but new people should start in the middle
-            elif p in self.appState.bSet:
+            elif p in self.appState.bSet and not p in self.appState.abIntersection:
                 if p in movedFromIntersection or p in movedFromA:
                     self.generations[g][2].insert(0,p)  # moved people shoudl start on the left
                 else:
@@ -990,7 +989,7 @@ class PedigreeComponent(AppComponent):
             self.aSlice.targetX = self.aWidth*xincrement
             self.bSlice.targetX = (self.aWidth+1+self.iWidth)*xincrement
             self.aLabel.targetX = self.aSlice.targetX / 2
-            self.iLabel.targetX = self.aSlice.targetX + (self.aSlice.targetX+self.bSlice.targetX)/2
+            self.iLabel.targetX = (self.aSlice.targetX+self.bSlice.targetX)/2
             self.bLabel.targetX = (self.bSlice.targetX + self.right)/2
             self.aSlice.show()
             self.bSlice.show()
@@ -1002,6 +1001,15 @@ class PedigreeComponent(AppComponent):
             for item in [self.aSlice,self.bSlice,self.aLabel,self.bLabel,self.iLabel]:
                 item.targetX = self.right
                 item.hide()
+            if self.aWidth > 0:
+                self.aLabel.targetX = self.right/2
+                self.aLabel.show()
+            elif self.iWidth > 0:
+                self.iLabel.targetX = self.right/2
+                self.iLabel.show()
+            elif self.bWidth > 0:
+                self.bLabel.targetX = self.right/2
+                self.bLabel.show()
         
         # set the node target positions
         y = node.EXPANDED_RADIUS   # start with an offset; nodes are drawn from the center
@@ -1063,6 +1071,12 @@ class PedigreeComponent(AppComponent):
             left = neighbors[m-1]-neighbors[0]
             right = neighbors[-1]-neighbors[m]
             return (neighbors[m-1]*right + neighbors[m]*left)/(left+right)
+    
+    def barycentricValue(self, neighbors):
+        if len(neighbors) == 0:
+            return -1.0
+        else:
+            return sum(neighbors)/float(len(neighbors))
     
     def countCrossings(self, person):
         '''
@@ -1165,7 +1179,7 @@ class PedigreeComponent(AppComponent):
                             if self.generationLookup[n][1] == 2:
                                 spanningIndex += self.iWidth
                             indices.append(spanningIndex)
-                        weights[p] = self.medianValue(indices)
+                        weights[p] = self.barycentricValue(indices)
                     newChunks[chunkNo] = sorted(chunk, key=lambda p: weights[p])
                 newGenerations[g] = tuple(newChunks)
                 
@@ -1206,6 +1220,9 @@ class PedigreeComponent(AppComponent):
     def updateValues(self):
         self.aSlice.updateValues()
         self.bSlice.updateValues()
+        self.aLabel.updateValues()
+        self.iLabel.updateValues()
+        self.bLabel.updateValues()
         
         idsToDel = set()
         for p,i in self.nodes.iteritems():
