@@ -91,21 +91,21 @@ class loading(object):
                 b.addItems(self.header)
                 if text != "":
                     b.setEditText(text)
-                    if text not in self.header:
+                    '''if text not in self.header:
                         if d in self.requiredForCalculateD:
                             enableButtonBox = False
                         elif currentProgram == 'vis':
-                            enableButtonBox = False
+                            enableButtonBox = False'''
                 elif d in self.header:
                     b.setEditText(d)
                 elif d.lower() in self.lowerHeader:
                     b.setEditText(self.header[self.lowerHeader.index(d.lower())])
                 else:
                     b.setEditText('')
-                    if d in self.requiredForCalculateD:
+                    '''if d in self.requiredForCalculateD:
                         enableButtonBox = False
                     elif currentProgram == 'vis':
-                        enableButtonBox = False
+                        enableButtonBox = False'''
             self.window.buttonBox.setEnabled(enableButtonBox)
     
     def browseOutput(self):
