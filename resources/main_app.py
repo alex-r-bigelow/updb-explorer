@@ -1,8 +1,3 @@
-'''
-Created on Apr 3, 2013
-
-@author: Alex Bigelow
-'''
 import sys
 from PySide.QtGui import QApplication
 from PySide.QtCore import QFile
