@@ -18,11 +18,15 @@ class App(object):
         
         # Add our custom table
         self.tableWidget = TableComponent(self.state)
-        self.window.lowSplitter.insertWidget(0,self.tableWidget)
-        self.window.lowSplitter.update()
+        self.window.historyDataSplitter.insertWidget(0,self.tableWidget)
+        self.window.historyDataSplitter.update()
         
-        # Add our pedigree view
-        self.pedigreeView = PedigreeComponent(self.window.pedigreeView, self.state)
+        # Add our pedigree view with its settings widgets
+        settingsWidgets = {'canvasWidth':self.window.canvasWidth,
+                           'canvasHeight':self.window.canvasHeight}
+        self.pedigreeView = PedigreeComponent(settingsWidgets, self.state)
+        self.window.pedigreeSplitter.insertWidget(0,self.pedigreeView)
+        self.window.pedigreeSplitter.update()
         
         self.window.showMaximized()
         #self.window.showFullScreen()

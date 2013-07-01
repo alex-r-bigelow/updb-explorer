@@ -1,5 +1,5 @@
 import random, math, networkx
-from PySide.QtGui import QGraphicsScene, QGraphicsItem, QPen, QPainterPath, QFont
+from PySide.QtGui import QGraphicsView, QGraphicsScene, QGraphicsItem, QPen, QPainterPath, QFont
 from PySide.QtCore import Qt, QRectF, QTimer
 from app_state import AppComponent
 import sys
@@ -113,93 +113,133 @@ class node(fadeableGraphicsItem):
     '''
     Graphical representation of a person in the pedigree
     '''
-    STROKE_WEIGHT = 6
-    
-    EXPANDED_RADIUS = 18
-    EXPANDED_RECT = QRectF(-EXPANDED_RADIUS,-EXPANDED_RADIUS,
-                          EXPANDED_RADIUS*2,EXPANDED_RADIUS*2)
-    EXPANDED_CIRCLE = QPainterPath()
-    EXPANDED_CIRCLE.addEllipse(EXPANDED_RECT)
-    
-    COLLAPSED_RADIUS = 6
-    COLLAPSED_RECT = QRectF(-COLLAPSED_RADIUS,-COLLAPSED_RADIUS,
-                           COLLAPSED_RADIUS*2,COLLAPSED_RADIUS*2)
-    COLLAPSED_CIRCLE = QPainterPath()
-    COLLAPSED_CIRCLE.addEllipse(COLLAPSED_RECT)
-    
-    FAN_OPACITY = 0.75
-    FAN_WEIGHT = 1.5
-    FAN_GAP = 2
-    FAN_RADIUS = 3
-    
-    TOP_RECT = QRectF(-FAN_RADIUS,-EXPANDED_RADIUS+FAN_GAP,
-                     FAN_RADIUS*2,FAN_RADIUS*2)
-    
-    TOP_TRIANGLE = QPainterPath()
-    TOP_TRIANGLE.moveTo(-FAN_RADIUS,-EXPANDED_RADIUS+FAN_GAP+FAN_RADIUS*2)
-    TOP_TRIANGLE.lineTo(0,-EXPANDED_RADIUS+FAN_GAP)
-    TOP_TRIANGLE.lineTo(FAN_RADIUS,-EXPANDED_RADIUS+FAN_GAP+FAN_RADIUS*2)
-    TOP_TRIANGLE.lineTo(-FAN_RADIUS,-EXPANDED_RADIUS+FAN_GAP+FAN_RADIUS*2)
-    
-    TOP_TRIANGLE_HALF = QPainterPath()
-    TOP_TRIANGLE_HALF.moveTo(0,-EXPANDED_RADIUS+FAN_GAP+FAN_RADIUS*2)
-    TOP_TRIANGLE_HALF.lineTo(0,-EXPANDED_RADIUS+FAN_GAP)
-    TOP_TRIANGLE_HALF.lineTo(FAN_RADIUS,-EXPANDED_RADIUS+FAN_GAP+FAN_RADIUS*2)
-    TOP_TRIANGLE_HALF.lineTo(0,-EXPANDED_RADIUS+FAN_GAP+FAN_RADIUS*2)
-    
-    LEFT_RECT = QRectF(-EXPANDED_RADIUS+FAN_GAP,-FAN_RADIUS,
-                      FAN_RADIUS*2,FAN_RADIUS*2)
-    
-    LEFT_TRIANGLE = QPainterPath()
-    LEFT_TRIANGLE.moveTo(-EXPANDED_RADIUS+FAN_GAP+FAN_RADIUS*2,-FAN_RADIUS)
-    LEFT_TRIANGLE.lineTo(-EXPANDED_RADIUS+FAN_GAP,0)
-    LEFT_TRIANGLE.lineTo(-EXPANDED_RADIUS+FAN_GAP+FAN_RADIUS*2,FAN_RADIUS)
-    LEFT_TRIANGLE.lineTo(-EXPANDED_RADIUS+FAN_GAP+FAN_RADIUS*2,-FAN_RADIUS)
-    
-    LEFT_TRIANGLE_HALF = QPainterPath()
-    LEFT_TRIANGLE_HALF.moveTo(-EXPANDED_RADIUS+FAN_GAP+FAN_RADIUS*2,0)
-    LEFT_TRIANGLE_HALF.lineTo(-EXPANDED_RADIUS+FAN_GAP,0)
-    LEFT_TRIANGLE_HALF.lineTo(-EXPANDED_RADIUS+FAN_GAP+FAN_RADIUS*2,-FAN_RADIUS)
-    LEFT_TRIANGLE_HALF.lineTo(-EXPANDED_RADIUS+FAN_GAP+FAN_RADIUS*2,0)
-    
-    RIGHT_RECT = QRectF(EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2,-FAN_RADIUS,
-                       FAN_RADIUS*2,FAN_RADIUS*2)
-    
-    RIGHT_TRIANGLE = QPainterPath()
-    RIGHT_TRIANGLE.moveTo(EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2,-FAN_RADIUS)
-    RIGHT_TRIANGLE.lineTo(EXPANDED_RADIUS-FAN_GAP,0)
-    RIGHT_TRIANGLE.lineTo(EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2,FAN_RADIUS)
-    RIGHT_TRIANGLE.lineTo(EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2,-FAN_RADIUS)
-    
-    RIGHT_TRIANGLE_HALF = QPainterPath()
-    RIGHT_TRIANGLE_HALF.moveTo(EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2,0)
-    RIGHT_TRIANGLE_HALF.lineTo(EXPANDED_RADIUS-FAN_GAP,0)
-    RIGHT_TRIANGLE_HALF.lineTo(EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2,FAN_RADIUS)
-    RIGHT_TRIANGLE_HALF.lineTo(EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2,0)
-    
-    BOTTOM_RECT = QRectF(-FAN_RADIUS,EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2,
-                        FAN_RADIUS*2,FAN_RADIUS*2)
-    
-    BOTTOM_TRIANGLE = QPainterPath()
-    BOTTOM_TRIANGLE.moveTo(-FAN_RADIUS,EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2)
-    BOTTOM_TRIANGLE.lineTo(0,EXPANDED_RADIUS-FAN_GAP)
-    BOTTOM_TRIANGLE.lineTo(FAN_RADIUS,EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2)
-    BOTTOM_TRIANGLE.lineTo(-FAN_RADIUS,EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2)
-    
-    BOTTOM_TRIANGLE_HALF = QPainterPath()
-    BOTTOM_TRIANGLE_HALF.moveTo(0,EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2)
-    BOTTOM_TRIANGLE_HALF.lineTo(0,EXPANDED_RADIUS-FAN_GAP)
-    BOTTOM_TRIANGLE_HALF.lineTo(-FAN_RADIUS,EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2)
-    BOTTOM_TRIANGLE_HALF.lineTo(0,EXPANDED_RADIUS-FAN_GAP-FAN_RADIUS*2)
-    
-    SCISSOR_OPACITY = 1.0
-    SCISSOR_WEIGHT = 3
-    
     UP = 0
     DOWN = 1
     HORIZONTAL = 2
     
+    STROKE_WEIGHT = 6
+    
+    SCISSOR_OPACITY = 1.0
+    SCISSOR_WEIGHT = 3
+    
+    FAN_OPACITY = 0.75
+    FAN_WEIGHT = 1.5
+    
+    # If any of these globals are ever tweaked...
+    EXPANDED_RADIUS = 18
+    COLLAPSED_RADIUS = 6
+    FAN_GAP = 2
+    FAN_RADIUS = 3
+    
+    # ... then these need to be updated by a call to updateProperties()
+    COLLAPSED_RECT = None
+    COLLAPSED_CIRCLE = None
+    EXPANDED_RECT = None
+    EXPANDED_CIRCLE = None
+    TOP_RECT = None
+    TOP_TRIANGLE = None
+    TOP_TRIANGLE_HALF = None
+    LEFT_RECT = None
+    LEFT_TRIANGLE = None
+    LEFT_TRIANGLE_HALF = None
+    RIGHT_RECT = None
+    RIGHT_TRIANGLE = None
+    RIGHT_TRIANGLE_HALF = None
+    BOTTOM_RECT = None
+    BOTTOM_TRIANGLE = None
+    BOTTOM_TRIANGLE_HALF = None
+    
+    # ...and, of course, we need to call it once at the beginning
+    GLOBALS_SET = False
+    
+    @staticmethod
+    def updateProperties(EXPANDED_RADIUS=None,
+                         COLLAPSED_RADIUS=None,
+                         FAN_GAP=None,
+                         FAN_RADIUS=None):
+        if EXPANDED_RADIUS != None:
+            node.EXPANDED_RADIUS = EXPANDED_RADIUS
+        if COLLAPSED_RADIUS != None:
+            node.COLLAPSED_RADIUS = COLLAPSED_RADIUS
+        if FAN_GAP != None:
+            node.FAN_GAP = FAN_GAP
+        if FAN_RADIUS != None:
+            node.FAN_RADIUS = FAN_RADIUS
+        
+        node.EXPANDED_RECT = QRectF(-node.EXPANDED_RADIUS,-node.EXPANDED_RADIUS,
+                              node.EXPANDED_RADIUS*2,node.EXPANDED_RADIUS*2)
+        node.EXPANDED_CIRCLE = QPainterPath()
+        node.EXPANDED_CIRCLE.addEllipse(node.EXPANDED_RECT)
+        
+        node.COLLAPSED_RECT = QRectF(-node.COLLAPSED_RADIUS,-node.COLLAPSED_RADIUS,
+                               node.COLLAPSED_RADIUS*2,node.COLLAPSED_RADIUS*2)
+        node.COLLAPSED_CIRCLE = QPainterPath()
+        node.COLLAPSED_CIRCLE.addEllipse(node.COLLAPSED_RECT)
+        
+        node.TOP_RECT = QRectF(-node.FAN_RADIUS,-node.EXPANDED_RADIUS+node.FAN_GAP,
+                         node.FAN_RADIUS*2,node.FAN_RADIUS*2)
+        
+        node.TOP_TRIANGLE = QPainterPath()
+        node.TOP_TRIANGLE.moveTo(-node.FAN_RADIUS,-node.EXPANDED_RADIUS+node.FAN_GAP+node.FAN_RADIUS*2)
+        node.TOP_TRIANGLE.lineTo(0,-node.EXPANDED_RADIUS+node.FAN_GAP)
+        node.TOP_TRIANGLE.lineTo(node.FAN_RADIUS,-node.EXPANDED_RADIUS+node.FAN_GAP+node.FAN_RADIUS*2)
+        node.TOP_TRIANGLE.lineTo(-node.FAN_RADIUS,-node.EXPANDED_RADIUS+node.FAN_GAP+node.FAN_RADIUS*2)
+        
+        node.TOP_TRIANGLE_HALF = QPainterPath()
+        node.TOP_TRIANGLE_HALF.moveTo(0,-node.EXPANDED_RADIUS+node.FAN_GAP+node.FAN_RADIUS*2)
+        node.TOP_TRIANGLE_HALF.lineTo(0,-node.EXPANDED_RADIUS+node.FAN_GAP)
+        node.TOP_TRIANGLE_HALF.lineTo(node.FAN_RADIUS,-node.EXPANDED_RADIUS+node.FAN_GAP+node.FAN_RADIUS*2)
+        node.TOP_TRIANGLE_HALF.lineTo(0,-node.EXPANDED_RADIUS+node.FAN_GAP+node.FAN_RADIUS*2)
+        
+        node.LEFT_RECT = QRectF(-node.EXPANDED_RADIUS+node.FAN_GAP,-node.FAN_RADIUS,
+                          node.FAN_RADIUS*2,node.FAN_RADIUS*2)
+        
+        node.LEFT_TRIANGLE = QPainterPath()
+        node.LEFT_TRIANGLE.moveTo(-node.EXPANDED_RADIUS+node.FAN_GAP+node.FAN_RADIUS*2,-node.FAN_RADIUS)
+        node.LEFT_TRIANGLE.lineTo(-node.EXPANDED_RADIUS+node.FAN_GAP,0)
+        node.LEFT_TRIANGLE.lineTo(-node.EXPANDED_RADIUS+node.FAN_GAP+node.FAN_RADIUS*2,node.FAN_RADIUS)
+        node.LEFT_TRIANGLE.lineTo(-node.EXPANDED_RADIUS+node.FAN_GAP+node.FAN_RADIUS*2,-node.FAN_RADIUS)
+        
+        node.LEFT_TRIANGLE_HALF = QPainterPath()
+        node.LEFT_TRIANGLE_HALF.moveTo(-node.EXPANDED_RADIUS+node.FAN_GAP+node.FAN_RADIUS*2,0)
+        node.LEFT_TRIANGLE_HALF.lineTo(-node.EXPANDED_RADIUS+node.FAN_GAP,0)
+        node.LEFT_TRIANGLE_HALF.lineTo(-node.EXPANDED_RADIUS+node.FAN_GAP+node.FAN_RADIUS*2,-node.FAN_RADIUS)
+        node.LEFT_TRIANGLE_HALF.lineTo(-node.EXPANDED_RADIUS+node.FAN_GAP+node.FAN_RADIUS*2,0)
+        
+        node.RIGHT_RECT = QRectF(node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2,-node.FAN_RADIUS,
+                           node.FAN_RADIUS*2,node.FAN_RADIUS*2)
+        
+        node.RIGHT_TRIANGLE = QPainterPath()
+        node.RIGHT_TRIANGLE.moveTo(node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2,-node.FAN_RADIUS)
+        node.RIGHT_TRIANGLE.lineTo(node.EXPANDED_RADIUS-node.FAN_GAP,0)
+        node.RIGHT_TRIANGLE.lineTo(node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2,node.FAN_RADIUS)
+        node.RIGHT_TRIANGLE.lineTo(node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2,-node.FAN_RADIUS)
+        
+        node.RIGHT_TRIANGLE_HALF = QPainterPath()
+        node.RIGHT_TRIANGLE_HALF.moveTo(node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2,0)
+        node.RIGHT_TRIANGLE_HALF.lineTo(node.EXPANDED_RADIUS-node.FAN_GAP,0)
+        node.RIGHT_TRIANGLE_HALF.lineTo(node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2,node.FAN_RADIUS)
+        node.RIGHT_TRIANGLE_HALF.lineTo(node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2,0)
+        
+        node.BOTTOM_RECT = QRectF(-node.FAN_RADIUS,node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2,
+                            node.FAN_RADIUS*2,node.FAN_RADIUS*2)
+        
+        node.BOTTOM_TRIANGLE = QPainterPath()
+        node.BOTTOM_TRIANGLE.moveTo(-node.FAN_RADIUS,node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2)
+        node.BOTTOM_TRIANGLE.lineTo(0,node.EXPANDED_RADIUS-node.FAN_GAP)
+        node.BOTTOM_TRIANGLE.lineTo(node.FAN_RADIUS,node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2)
+        node.BOTTOM_TRIANGLE.lineTo(-node.FAN_RADIUS,node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2)
+        
+        node.BOTTOM_TRIANGLE_HALF = QPainterPath()
+        node.BOTTOM_TRIANGLE_HALF.moveTo(0,node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2)
+        node.BOTTOM_TRIANGLE_HALF.lineTo(0,node.EXPANDED_RADIUS-node.FAN_GAP)
+        node.BOTTOM_TRIANGLE_HALF.lineTo(-node.FAN_RADIUS,node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2)
+        node.BOTTOM_TRIANGLE_HALF.lineTo(0,node.EXPANDED_RADIUS-node.FAN_GAP-node.FAN_RADIUS*2)
+    
     def __init__(self, personID, panel, startingX = None, startingY = None):
+        if not node.GLOBALS_SET:
+            node.updateProperties()
+            node.GLOBALS_SET = True
         if startingX == None:
             startingX = random.randint(0,panel.right)
         if startingY == None:
@@ -431,34 +471,67 @@ class pedigreeSlice(fadeableGraphicsItem):
     The physical divider between segments of our pedigree
     '''
     OPACITY_PROPORTION = 0.5
+    SIZE_PROPORTION = 0.8
     THICKNESS = 5
     
-    def __init__(self, x, y, height, brush):
-        fadeableGraphicsItem.__init__(self, x, y)
-        self.height = height
+    BOUNDING_BOX = QRectF()
+    HEIGHT = 0
+    
+    ALL_INSTANCES = set()
+    
+    @staticmethod
+    def resize(sceneHeight):
+        pedigreeSlice.HEIGHT = sceneHeight*pedigreeSlice.SIZE_PROPORTION
+        pedigreeSlice.BOUNDING_BOX = QRectF(-pedigreeSlice.THICKNESS*0.5,
+                                            -pedigreeSlice.HEIGHT*0.5,
+                                            pedigreeSlice.THICKNESS,
+                                            pedigreeSlice.HEIGHT)
+        
+        for i in pedigreeSlice.ALL_INSTANCES:
+            i.targetY = sceneHeight/2
+            i.prepareGeometryChange()
+    
+    def __init__(self, x, brush):
+        fadeableGraphicsItem.__init__(self, x, 0)
         self.brush = brush
         self.setZValue(4)
+        pedigreeSlice.ALL_INSTANCES.add(self)
     
     def boundingRect(self):
-        return QRectF(-pedigreeSlice.THICKNESS*0.5,-self.height*0.5,pedigreeSlice.THICKNESS,self.height)
+        return pedigreeSlice.BOUNDING_BOX
     
     def paint(self, painter, option, widget=None):
         painter.setOpacity(self.opacity*pedigreeSlice.OPACITY_PROPORTION)
-        painter.fillRect(-pedigreeSlice.THICKNESS*0.5,-self.height*0.5,pedigreeSlice.THICKNESS,self.height,self.brush)
+        painter.fillRect(pedigreeSlice.BOUNDING_BOX,self.brush)
 
 class pedigreeLabel(fadeableGraphicsItem):
     '''
     The label that floats in the background to tell us which pedigree is which
     '''
-    BOUNDING_BOX = QRectF(-400,-400,800,800)
-    FONT = QFont('Helvetica',128)
     OPACITY_PROPORTION = 0.25
+    SIZE_PROPORTION = 0.2
     
-    def __init__(self, text, color, x, y):
-        fadeableGraphicsItem.__init__(self, x, y)
+    BOUNDING_BOX = QRectF()
+    FONT = None
+    
+    ALL_INSTANCES = set()
+    
+    @staticmethod
+    def resize(sceneHeight):
+        points = sceneHeight*pedigreeLabel.SIZE_PROPORTION
+        pedigreeLabel.BOUNDING_BOX = QRectF(-points*2,-points*2,points*4,points*4)
+        pedigreeLabel.FONT = QFont('Helvetica',points)
+        
+        for i in pedigreeLabel.ALL_INSTANCES:
+            i.targetY = sceneHeight/2
+            i.prepareGeometryChange()
+    
+    def __init__(self, text, color, x):
+        fadeableGraphicsItem.__init__(self, x, 0)
         self.text = text
         self.pen = QPen(color)
         self.setZValue(2)
+        pedigreeLabel.ALL_INSTANCES.add(self)
     
     def boundingRect(self):
         return pedigreeLabel.BOUNDING_BOX
@@ -562,11 +635,16 @@ class edgeLayer(QGraphicsItem):
                     self.drawLine(painter, n, n2, pn.x(), pn.y(), cn.x(), cn.y())
                     finishedEdges.add((pn,cn))
             
-class PedigreeComponent(AppComponent):
+class PedigreeComponent(QGraphicsView,AppComponent):
     FRAME_DURATION = 1000/60 # 60 FPS
     
-    def __init__(self, view, appState):
-        self.view = view
+    ZOOM_DELAY = 150   # .15 sec
+    ZOOM_BOUNDS = (100,5000)
+    ZOOM_INCREMENT = 50
+    
+    def __init__(self, settingsWidgets, appState):
+        QGraphicsView.__init__(self)
+        self.settingsWidgets = settingsWidgets
         self.appState = appState
         self.appState.registerComponent(self)
         
@@ -598,47 +676,98 @@ class PedigreeComponent(AppComponent):
         self.rearrange = True
         
         self.scene = QGraphicsScene()
-        self.view.setScene(self.scene)
+        self.setScene(self.scene)
         # TODO: figure out these sizes differently...
         self.bottom = 500
-        self.right = 1800
+        self.right = 1000
+        
+        self.lastZoomCenter = None
         
         # Background
         self.edges = edgeLayer(self)
         self.scene.addItem(self.edges)
         
         # Slices
-        self.aSlice = pedigreeSlice(self.right,self.bottom/2,self.bottom,
-                                    self.appState.MISSING_COLOR)
+        self.aSlice = pedigreeSlice(self.right,self.appState.MISSING_COLOR)
         self.scene.addItem(self.aSlice)
         self.aSlice.hide()
         
-        self.bSlice = pedigreeSlice(self.right,self.bottom/2,self.bottom,
-                                    self.appState.MISSING_COLOR)
+        self.bSlice = pedigreeSlice(self.right,self.appState.MISSING_COLOR)
         self.scene.addItem(self.bSlice)
         self.bSlice.hide()
         
         # Labels
-        self.aLabel = pedigreeLabel("A",self.appState.A_COLOR,
-                                    self.right,self.bottom/2)
+        self.aLabel = pedigreeLabel("A",self.appState.A_COLOR,self.right)
         self.scene.addItem(self.aLabel)
         self.aLabel.hide()
         
-        self.bLabel = pedigreeLabel("B",self.appState.B_COLOR,
-                                    self.right,self.bottom/2)
+        self.bLabel = pedigreeLabel("B",self.appState.B_COLOR,self.right)
         self.scene.addItem(self.bLabel)
         self.bLabel.hide()
         
-        self.iLabel = pedigreeLabel("A "+unichr(8745)+" B",self.appState.INTERSECTION_COLOR,
-                                    self.right,self.bottom/2)
+        self.iLabel = pedigreeLabel("A "+unichr(8745)+" B",self.appState.INTERSECTION_COLOR,self.right)
         self.scene.addItem(self.iLabel)
         self.iLabel.hide()
         
-        # TODO: add some buttons for union, intersection, and closing A and B
+        self.bindSettingsEvents()
         
-        self.timer = QTimer(self.view)
+        self.timer = QTimer(self)
         self.timer.timeout.connect(self.updateValues)
         self.timer.start(PedigreeComponent.FRAME_DURATION)
+        
+        self.zoomTimer = QTimer(self)
+        self.zoomTimer.setSingleShot(True)
+        self.zoomTimer.timeout.connect(self.updateZoom)
+        self.zoomTimer.start(PedigreeComponent.ZOOM_DELAY)
+    
+    def bindSettingsEvents(self):
+        self.settingsWidgets['canvasWidth'].setRange(PedigreeComponent.ZOOM_BOUNDS[0],
+                                                     PedigreeComponent.ZOOM_BOUNDS[1])
+        self.settingsWidgets['canvasWidth'].setSingleStep(PedigreeComponent.ZOOM_INCREMENT)
+        self.settingsWidgets['canvasHeight'].setRange(PedigreeComponent.ZOOM_BOUNDS[0],
+                                                     PedigreeComponent.ZOOM_BOUNDS[1])
+        self.settingsWidgets['canvasHeight'].setSingleStep(PedigreeComponent.ZOOM_INCREMENT)
+        
+        self.settingsWidgets['canvasWidth'].setValue(self.right)
+        self.settingsWidgets['canvasHeight'].setValue(self.bottom)
+        
+        self.settingsWidgets['canvasWidth'].valueChanged.connect(self.updateCanvasSize)
+        self.settingsWidgets['canvasHeight'].valueChanged.connect(self.updateCanvasSize)
+    
+    def wheelEvent(self, event):
+        mods = event.modifiers()
+        numSteps = int(event.delta() / 120)  # most mice jump 15 degrees at a time, event.delta() is in eights of a degree
+        
+        # TODO: adjust the center to zoom in on where the mouse is pointing
+        
+        if mods & Qt.ShiftModifier and mods & Qt.AltModifier:
+            if abs(numSteps) > 0:
+                self.settingsWidgets['canvasHeight'].setValue(self.bottom+PedigreeComponent.ZOOM_INCREMENT*numSteps)
+                self.settingsWidgets['canvasWidth'].setValue(self.right+PedigreeComponent.ZOOM_INCREMENT*numSteps)
+        elif mods == Qt.ShiftModifier:
+            if abs(numSteps) > 0:
+                self.settingsWidgets['canvasHeight'].setValue(self.bottom+PedigreeComponent.ZOOM_INCREMENT*numSteps)
+        elif mods == Qt.AltModifier:
+            if abs(numSteps) > 0:
+                self.settingsWidgets['canvasWidth'].setValue(self.right+PedigreeComponent.ZOOM_INCREMENT*numSteps)
+        else:
+            event.ignore()
+            QGraphicsView.wheelEvent(self, event)
+    
+    def updateCanvasSize(self):
+        self.right = self.settingsWidgets['canvasWidth'].value()
+        self.bottom = self.settingsWidgets['canvasHeight'].value()
+        self.zoomTimer.start(PedigreeComponent.ZOOM_DELAY)
+    
+    def updateZoom(self):
+        self.updateScreenPositions()
+        if self.lastZoomCenter != None:
+            self.centerOn(self.lastZoomCenter[0],self.lastZoomCenter[1])
+            self.lastZoomCenter = None
+        
+        pedigreeLabel.resize(self.bottom)
+        pedigreeSlice.resize(self.bottom)
+        self.scene.setSceneRect(QRectF())
     
     def addCorpse(self,i):
         self.corpses.add(i)
@@ -902,6 +1031,17 @@ class PedigreeComponent(AppComponent):
         self.iWidth = widths[1]
         self.bWidth = widths[2]
     
+    def buildGenerationLookup(self):
+        '''
+        When swapping the order inside chunks we only need to rebuild this lookup - the rest of the structures are still valid
+        '''
+        self.generationLookup = {}
+        for g in self.generationOrder:
+            chunks = self.generations[g]
+            for chunkNo,chunk in enumerate(chunks):
+                for index,p in enumerate(chunk):
+                    self.generationLookup[p] = (g,chunkNo,index)
+    
     def refreshHiddenCounts(self):
         '''
         Each node needs to know how many people are visible next to it
@@ -986,8 +1126,8 @@ class PedigreeComponent(AppComponent):
             xincrement = (self.right-node.EXPANDED_RADIUS*2)/max(self.aWidth+self.iWidth+self.bWidth+1,2)  
             # the extra width is for the slices
             
-            self.aSlice.targetX = self.aWidth*xincrement
-            self.bSlice.targetX = (self.aWidth+1+self.iWidth)*xincrement
+            self.aSlice.targetX = (self.aWidth+1)*xincrement
+            self.bSlice.targetX = (self.aWidth+1+self.iWidth+1)*xincrement
             self.aLabel.targetX = self.aSlice.targetX / 2
             self.iLabel.targetX = (self.aSlice.targetX+self.bSlice.targetX)/2
             self.bLabel.targetX = (self.bSlice.targetX + self.right)/2
@@ -1078,13 +1218,13 @@ class PedigreeComponent(AppComponent):
         else:
             return sum(neighbors)/float(len(neighbors))
     
-    def countCrossings(self, person):
+    def countCrossings(self, p):
         '''
         Counts the number of edges that cross; relies heavily on the convenience structures
         '''
         totalCrossings = 0
         # secondary sort by index
-        parents = sorted(self.iterGenerationsFrom(person,
+        parents = sorted(self.iterGenerationsFrom(p,
                                                   directions=[node.UP],
                                                   relationships=None,
                                                   level=1,
@@ -1101,20 +1241,20 @@ class PedigreeComponent(AppComponent):
         gen = self.generationLookup[parents[0]][0]
         chunk = self.generationLookup[parents[0]][1]
         index = self.generationLookup[parents[0]][2]
-        while chunk <= self.generationLookup[parents[-1]][1] and chunk < 3:
+        while chunk <= self.generationLookup[parents[-1]][1]:
+            assert chunk < 3
             while index <= self.generationLookup[parents[-1]][2] and index < len(self.generations[gen][chunk]):
-                parentSpanPeeps.append(self.generations[gen][chunk][index])
+                spanParent = self.generations[gen][chunk][index]
+                parentSpanPeeps.append(spanParent)
                 index += 1
             index = 0
             chunk += 1
-        
-        parents = set(parents)
-        
-        myChunk = self.generationLookup[person][1]
-        myIndex = self.generationLookup[person][2]
-        
+                
+        myChunk = self.generationLookup[p][1]
+        myIndex = self.generationLookup[p][2]
+
         for p2 in parentSpanPeeps:
-            numParentsToTheLeft = 0
+            numParentsToTheLeft = -1
             numParentsToTheRight = len(parents)
             if p2 in parents:
                 numParentsToTheLeft += 1
@@ -1123,12 +1263,14 @@ class PedigreeComponent(AppComponent):
                 # we need to know the number of children of this unrelated person to the left and right of person
                 unrelatedLeftNeighbors = 0
                 unrelatedRightNeighbors = 0
-                for p3 in self.iterGenerationsFrom(p2,
+                
+                unrelatedNeighbors = list(self.iterGenerationsFrom(p2,
                                                    directions=[node.DOWN],
                                                    relationships=None,
                                                    level=1,
                                                    skipFirst=True,
-                                                   yieldGhosts=True):
+                                                   yieldGhosts=True))
+                for p3 in unrelatedNeighbors:
                     if self.generationLookup[p3][1] < myChunk:
                         unrelatedLeftNeighbors += 1
                     elif self.generationLookup[p3][1] > myChunk:
@@ -1149,24 +1291,39 @@ class PedigreeComponent(AppComponent):
             totalCrossings += self.countCrossings(p)
         return totalCrossings
     
-    def minimizeCrossings(self, iterations=9, startTop=True):
-        newGenerations = {}
+    def minimizeCrossings(self, min_iterations=0, max_iterations=9, startTop=True):
         maxCrossings = float('inf')
-        triedOnce = False
-        for iterNo in xrange(iterations):  # @UnusedVariable
+        hadImprovement = True
+        unproductiveIterations = 0
+        for iterNo in xrange(max_iterations):  # @UnusedVariable
+            if not hadImprovement:
+                if unproductiveIterations >= min_iterations:
+                    self.rearrange = False
+                    return
+                else:
+                    unproductiveIterations += 1
+            
+            hadImprovement = False
+            
             if startTop:
                 gOrder = self.generationOrder
             else:
                 gOrder = reversed(self.generationOrder)
             
             # First sort the indices using the dot layout median weighting scheme
+            oldGenerations = {}
+            
             for g in gOrder:
                 newChunks = [[],[],[]]
                 for chunkNo,chunk in enumerate(self.generations[g]):
                     weights = {}
                     for p in chunk:
+                        if startTop:
+                            dirs = [node.UP,node.HORIZONTAL]
+                        else:
+                            dirs = [node.DOWN,node.HORIZONTAL]
                         neighbors = self.iterGenerationsFrom(p,
-                                                             directions=[node.UP,node.HORIZONTAL],
+                                                             directions=dirs,
                                                              relationships=None,
                                                              level=1,
                                                              skipFirst=True,
@@ -1181,40 +1338,53 @@ class PedigreeComponent(AppComponent):
                             indices.append(spanningIndex)
                         weights[p] = self.barycentricValue(indices)
                     newChunks[chunkNo] = sorted(chunk, key=lambda p: weights[p])
-                newGenerations[g] = tuple(newChunks)
-                
-            # TODO: transpose step
-            
-            oldGenerations = self.generations
-            oldGenerationOrder = self.generationOrder
-            oldGenerationLookup = self.generationLookup
-            oldGenerationNetwork = self.generationNetwork
-            oldAWidth = self.aWidth
-            oldIWidth = self.iWidth
-            oldBWidth = self.bWidth
-            
-            self.generations = newGenerations
-            self.generationOrder = sorted(self.generations.keys())
-            self.indexGenerations()
+                oldGenerations[g] = self.generations[g]
+                self.generations[g] = tuple(newChunks)
+                # TODO: since I just changed one generation, I could probably get a speed boost here
+                # if I only rebuild the generation lookup for this generation
+                self.buildGenerationLookup()
             
             crossings = self.countAllCrossings()
             if crossings < maxCrossings:
                 maxCrossings = crossings
-                triedOnce = False
+                hadImprovement = True
+                unproductiveIterations = 0
             else:
                 self.generations = oldGenerations
-                self.generationOrder = oldGenerationOrder
-                self.generationLookup = oldGenerationLookup
-                self.generationNetwork = oldGenerationNetwork
-                self.aWidth = oldAWidth
-                self.iWidth = oldIWidth
-                self.bWidth = oldBWidth
-                
-                if not triedOnce:
-                    triedOnce = True
-                else:
-                    self.rearrange = False
-                    return
+                        
+            # Transpose step: try to swap every adjacent and see if it reduces our crossings
+            for g in gOrder:
+                newChunks = [[],[],[]]
+                for chunkNo in xrange(len(self.generations[g])):
+                    for i in xrange(len(self.generations[g][chunkNo])-1):
+                        j = i+1
+                        
+                        # Try the swap
+                        pi = self.generations[g][chunkNo][i]
+                        pj = self.generations[g][chunkNo][j]
+                        self.generations[g][chunkNo][j] = pi
+                        self.generations[g][chunkNo][i] = pj
+                        
+                        # TODO: this is slowing me down a TON... but for some reason only
+                        # updating the two entries is causing me assertion errors...?
+                        self.buildGenerationLookup()
+                        #self.generationLookup[pi] = (g,chunkNo,j)
+                        #self.generationLookup[pj] = (g,chunkNo,i)
+                        
+                        # Did we improve?
+                        crossings = self.countAllCrossings()
+                        if crossings < maxCrossings:
+                            maxCrossings = crossings
+                            hadImprovement = True
+                            unproductiveIterations = 0
+                        else:
+                            # Nope... swap back
+                            self.generations[g][chunkNo][i] = pi
+                            self.generations[g][chunkNo][j] = pj
+                            #self.generationLookup[pi] = (g,chunkNo,i)
+                            #self.generationLookup[pj] = (g,chunkNo,j)
+                            self.buildGenerationLookup()
+            
             startTop = not startTop # alternate top to bottom and bottom to top
     
     def updateValues(self):
